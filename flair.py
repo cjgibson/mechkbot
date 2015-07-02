@@ -68,15 +68,19 @@ def main():
 				return False
 		return True
 
-	def values(item):
-		if not item.author_flair_css_class:
-			item.author_flair_css_class = 'i-1'
-		elif item.author_flair_css_class and 'i-mod' in item.author_flair_css_class:
-			pass
-		else:
-			item.author_flair_css_class = str(int(item.author_flair_css_class) + 1)
-		if not item.author_flair_text:
-			item.author_flair_text = ''
+def values(item):
+    if not item.author_flair_css_class:
+        item.author_flair_css_class = 'i-none'
+    elif (item.author_flair_css_class and
+          'i-mod' in item.author_flair_css_class):
+        pass
+    else:
+        item.author_flair_css_class = ('i-%d' %
+            (int(''.join([c
+                         for c in item.author_flair_css_class
+                         if c in '0123456789'])) + 1))
+    if not item.author_flair_text:
+        item.author_flair_text = ''
 
 	def flair(item):
 		if item.author_flair_css_class != 'i-mod':
