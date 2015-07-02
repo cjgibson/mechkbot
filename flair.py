@@ -17,6 +17,7 @@ username = cfg_file.get('reddit', 'username')
 password = cfg_file.get('reddit', 'password')
 subreddit = cfg_file.get('reddit', 'subreddit')
 multiprocess = cfg_file.get('reddit', 'multiprocess')
+verbose = bool(cfg_file.get('reddit', 'verbose'))
 link_id = cfg_file.get('trade', 'link_id')
 equal_warning = cfg_file.get('trade', 'equal_msg')
 age_warning = cfg_file.get('trade', 'age_msg')
@@ -24,7 +25,7 @@ age_restriction = float(cfg_file.get('trade', 'age_res'))
 karma_warning = cfg_file.get('trade', 'karma_msg')
 karma_restriction = float(cfg_file.get('trade', 'karma_res'))
 respond = cfg_file.get('trade', 'respond')
-added_msg = cfg_file.get('trade', 'added')
+added_msg = cfg_file.get('trade', 'added_msg')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
@@ -43,7 +44,7 @@ def main():
         except:
             return 0
 
-    def conditions():
+    def conditions(comment):
         if comment.id in completed:
             return False
         if not hasattr(comment.author, 'name'):
@@ -56,12 +57,13 @@ def main():
             return False
         return True
 
-    def check_self_reply(item):
+    def check_self_reply(comment, parent):
         if comment.author.name == parent.author.name:
-            item.reply(equal_warning)
-            item.report()
+            comment.reply(equal_warning)
+            comment.report()
+            save(comment)
             parent.report()
-            save()
+            save(parent)
             return False
         return True
 
@@ -96,7 +98,6 @@ def main():
             except:
                 logging.error('Failed to set flair for user with flair class "%s".'
                               % item.author_flair_css_class)
-        print item.author_flair_css_class
         if not item.author_flair_text:
             item.author_flair_text = ''
 
@@ -110,7 +111,7 @@ def main():
                 if com.author.name == item.author.name:
                     com.author_flair_css_class = item.author_flair_css_class
 
-    def save():
+    def save(comment):
         with open (link_id + ".log", 'a') as myfile:
                 myfile.write('%s\n' % comment.id)
 
@@ -131,6 +132,7 @@ def main():
                 r = praw.Reddit(user_agent=username, handler=handler)
             else:
                 r = praw.Reddit(user_agent=username)
+            if verbose: print 'Logging in as /u/%s.' % username
             r.login(username, password)
 
             # Get the submission and the comments
@@ -139,12 +141,14 @@ def main():
             flat_comments = list(praw.helpers.flatten_tree(submission.comments))
 
             for comment in flat_comments:
+                if verbose: print 'Parsing: "%s"' % comment.body
 
-                if not conditions():
+                if not conditions(comment):
                     continue
                 parent = [com for com in flat_comments
                           if com.fullname == comment.parent_id][0]
-                if not check_self_reply(comment):
+                if not check_self_reply(comment, parent):
+                    if verbose: print '/u/%s attempted to trade with themselves.' % comment.author
                     continue
 
                 # Check Account Age and Karma
@@ -161,9 +165,10 @@ def main():
                 flair(comment)
                 flair(parent)
                 comment.reply(added_msg)
-                save()
+                save(comment)
 
         except Exception as e:
+            print traceback.format_exc()
             logging.error(e)
 
         sleep(float(cfg_file.get('trade', 'sleep')))

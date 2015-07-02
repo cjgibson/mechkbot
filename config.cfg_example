@@ -3,6 +3,7 @@ username = YOUR_REDDIT_USERNAME_HERE
 password = YOUR_REDDIT_PASSWORD_HERE
 subreddit = YOUR_SUBREDDIT_NAME_HERE
 multiprocess = false
+verbose = false
 
 [post]
 start = LINE_ABOVE_WHERE_TRADE_TREAD_BUTTON_WILL_BE_ON_SIDEBAR
@@ -23,6 +24,7 @@ respond = true
 added_msg = Trade confirmed.
 
 [heatware]
+link_id = HEATWARE_FLAIR_THREAD_ID_HERE
 regex = (?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)
 group = 1
 respond = true
