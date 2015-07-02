@@ -52,7 +52,7 @@ def main():
 							if comment.author_flair_css_class:
 								comment.subreddit.set_flair(comment.author, url, comment.author_flair_css_class)
 							else:
-								comment.subreddit.set_flair(comment.author, url, '')
+								comment.subreddit.set_flair(comment.author, url, 'i-none')
 						if respond == 'yes':
 							comment.reply('added')
 			if flaircount > 0:

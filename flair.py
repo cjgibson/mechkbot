@@ -69,14 +69,20 @@ def main():
 		return True
 
 	def values(item):
-		if not item.author_flair_css_class or 'i-none' in item.author_flair_css_class:
+		if not item.author_flair_css_class or 'none' in item.author_flair_css_class:
 			item.author_flair_css_class = 'i-1'
-		elif item.author_flair_css_class and 'i-mod' in item.author_flair_css_class:
+		elif (item.author_flair_css_class and
+		      any(ignore in item.author_flair_css_class
+		          for ignore in ['mod', 'bot', 'mookzs', 'vendor'])):
 			pass
 		else:
-			item.author_flair_css_class = ('i-%d' % (int(
-				''.join([c for c in item.author_flair_css_class
-						 if c in '0123456789'])) + 1))
+			try:
+				item.author_flair_css_class = ('i-%d' % (int(
+				    ''.join([c for c in item.author_flair_css_class
+				             if c in '0123456789'])) + 1))
+			except:
+				logging.error('Failed to set flair for user with flair class "%s".'
+				              % item.author_flair_css_class)
 		if not item.author_flair_text:
 			item.author_flair_text = ''
 
