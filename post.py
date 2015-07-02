@@ -51,11 +51,11 @@ def main():
 
     # Regex work
     replace_pattern = re.compile('%s.*?%s' % (re.escape(start), re.escape(end)),
-								              re.IGNORECASE | re.DOTALL | re.UNICODE)
+                                              re.IGNORECASE | re.DOTALL | re.UNICODE)
     new_sidebar = re.sub(replace_pattern,
                         '%s\n%s\n%s' % (start,
-									    name + 'http://redd.it/' + submission.id + ')',
-									    end),
+                                        '[' + name + '](http://redd.it/' + submission.id + ')',
+                                        end),
                         current_sidebar)
     
     # Update the Sidebar

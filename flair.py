@@ -28,8 +28,8 @@ added_msg = cfg_file.get('trade', 'added')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
-				    filename='actions.log',
-				    format='%(asctime)s - %(message)s')
+                    filename='actions.log',
+                    format='%(asctime)s - %(message)s')
 requests_log = logging.getLogger("requests")
 requests_log.setLevel(logging.WARNING)
 
@@ -38,8 +38,8 @@ def main():
     def numeric_flair(item):
         try:
             return int(''.join(
-						[c for c in item.author_flair_css_class
-						 if c in string.digits]))
+                        [c for c in item.author_flair_css_class
+                         if c in string.digits]))
         except:
             return 0
 
@@ -68,7 +68,7 @@ def main():
     def verify(item):
         karma = item.author.link_karma + item.author.comment_karma
         age = (datetime.utcnow() - 
-			   datetime.utcfromtimestamp(item.author.created_utc)).days
+               datetime.utcfromtimestamp(item.author.created_utc)).days
 
         if numeric_flair(item) < 1:
             if age < age_restriction:
@@ -143,7 +143,7 @@ def main():
                 if not conditions():
                     continue
                 parent = [com for com in flat_comments
-						  if com.fullname == comment.parent_id][0]
+                          if com.fullname == comment.parent_id][0]
                 if not check_self_reply(comment):
                     continue
 

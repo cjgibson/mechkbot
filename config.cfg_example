@@ -4,11 +4,13 @@ password = YOUR_REDDIT_PASSWORD_HERE
 subreddit = YOUR_SUBREDDIT_NAME_HERE
 multiprocess = false
 
-[heatware]
-regex = (?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)
-group = 1
-respond = true
-added_msg = Heatware added.
+[post]
+start = LINE_ABOVE_WHERE_TRADE_TREAD_BUTTON_WILL_BE_ON_SIDEBAR
+end = LINE_BELOW_WHERE_TRADE_THREAD_BUTTON_WILL_BE_ON_SIDEBAR
+text = Post your trades below, and confirm them by having the person you traded with reply to your comment with the phrase 'confirmed'.
+name = Confirm your Trades Here
+msg_title = Created New Monthly Trade Thread
+message = Hey Mods! Your friendly trade bot here, just letting you know I've gone ahead and created this month's trade tread for you!
 
 [trade]
 sleep = 150
@@ -19,3 +21,9 @@ karma_msg = Due to the unusually low amount of link and comment karma attached t
 karma_res = 10
 respond = true
 added_msg = Trade confirmed.
+
+[heatware]
+regex = (?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)
+group = 1
+respond = true
+added_msg = Heatware added.

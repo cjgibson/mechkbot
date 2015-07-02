@@ -15,11 +15,12 @@ cfg_file.read(path_to_cfg)
 username = cfg_file.get('reddit', 'username')
 password = cfg_file.get('reddit', 'password')
 subreddit = cfg_file.get('reddit', 'subreddit')
+multiprocess = cfg_file.get('reddit', 'multiprocess')
 link_id = cfg_file.get('heatware', 'link_id')
-respond = cfg_file.get('heatware', 'respond')
 regex = cfg_file.get('heatware', 'regex')
 group = int(cfg_file.get('heatware', 'group'))
-multiprocess = cfg_file.get('reddit', 'multiprocess')
+respond = cfg_file.get('heatware', 'respond')
+added_msg = cfg_file.get('heatware', 'added_msg')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, filename='actions.log')
@@ -57,7 +58,7 @@ def main():
                             else:
                                 comment.subreddit.set_flair(comment.author, url, 'i-none')
                         if respond == 'true':
-                            comment.reply('added')
+                            comment.reply(added_msg)
             if flaircount > 0:
                 logging.info('Set flair for ' + str(flaircount) + ' user(s)!')
 
