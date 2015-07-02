@@ -1,0 +1,21 @@
+[reddit]
+username = YOUR_REDDIT_USERNAME_HERE
+password = YOUR_REDDIT_PASSWORD_HERE
+subreddit = YOUR_SUBREDDIT_NAME_HERE
+multiprocess = false
+
+[heatware]
+regex = (?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)
+group = 1
+respond = true
+added_msg = Heatware added.
+
+[trade]
+sleep = 150
+equal_msg = You cannot confirm a trade with yourself.
+age_msg = Due to your account age, the moderators will have to approve this trade manually.
+age_res = 14
+karma_msg = Due to the unusually low amount of link and comment karma attached to this account, the moderators will have to approve this trade manually.
+karma_res = 10
+respond = true
+added_msg = Trade confirmed.

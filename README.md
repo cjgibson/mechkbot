@@ -1,4 +1,6 @@
-hwsbot
-======
+/u/mechkbot
+===========
 
-Scripts that are used on /u/mechkbot created by the mods of /r/hardwareswap modified for /r/mechmarket by /u/thelectronicnub and /u/Iacoizumi
+A series of scripts utilized by the mod team of reddit's [/r/mechmarket](https://www.reddit.com/r/mechmarket) to monitor and award trade flair to its userbase.
+
+Lovingly cloned from the source code for [/r/hardwareswap](https://www.reddit.com/r/hardwareswap)'s trade bot.

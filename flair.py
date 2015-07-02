@@ -1,11 +1,12 @@
-import sys, os
 from ConfigParser import SafeConfigParser
+from datetime import datetime
+from time import sleep
 import logging
+import os
 import praw
-from praw.handlers import MultiprocessHandler
-import datetime
-from datetime import datetime, timedelta
-from time import sleep, time
+import string
+import sys
+
 
 # load config file
 containing_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -17,140 +18,155 @@ password = cfg_file.get('reddit', 'password')
 subreddit = cfg_file.get('reddit', 'subreddit')
 multiprocess = cfg_file.get('reddit', 'multiprocess')
 link_id = cfg_file.get('trade', 'link_id')
-equal_warning = cfg_file.get('trade', 'equal')
-age_warning = cfg_file.get('trade', 'age')
-karma_warning = cfg_file.get('trade', 'karma')
+equal_warning = cfg_file.get('trade', 'equal_msg')
+age_warning = cfg_file.get('trade', 'age_msg')
+age_restriction = float(cfg_file.get('trade', 'age_res'))
+karma_warning = cfg_file.get('trade', 'karma_msg')
+karma_restriction = float(cfg_file.get('trade', 'karma_res'))
+respond = cfg_file.get('trade', 'respond')
 added_msg = cfg_file.get('trade', 'added')
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, filename='actions.log', format='%(asctime)s - %(message)s')
+logging.basicConfig(level=logging.INFO,
+				    filename='actions.log',
+				    format='%(asctime)s - %(message)s')
 requests_log = logging.getLogger("requests")
 requests_log.setLevel(logging.WARNING)
 
 def main():
 
-	def conditions():
-		if comment.id in completed:
-			return False
-		if not hasattr(comment.author, 'name'):
-			return False
-		if 'confirm' not in comment.body.lower():
-			return False
-		if comment.author.name == username:
-			return False
-		if comment.is_root == True:
-			return False
-		return True
+    def numeric_flair(item):
+        try:
+            return int(''.join(
+						[c for c in item.author_flair_css_class
+						 if c in string.digits]))
+        except:
+            return 0
 
-	def check_self_reply():
-		if comment.author.name == parent.author.name:
-			item.reply(equal_warning)
-			item.report()
-			parent.report()
-			save()
-			return False
-		return True
+    def conditions():
+        if comment.id in completed:
+            return False
+        if not hasattr(comment.author, 'name'):
+            return False
+        if 'confirm' not in comment.body.lower():
+            return False
+        if comment.author.name == username:
+            return False
+        if comment.is_root == True:
+            return False
+        return True
 
-	def verify(item):
-		karma = item.author.link_karma + item.author.comment_karma
-		age = (datetime.utcnow() - datetime.utcfromtimestamp(item.author.created_utc)).days
+    def check_self_reply(item):
+        if comment.author.name == parent.author.name:
+            item.reply(equal_warning)
+            item.report()
+            parent.report()
+            save()
+            return False
+        return True
 
-		if item.author_flair_css_class < 1:
-			if age < 14:
-				item.report()
-				item.reply(age_warning)
-				save()
-				return False
-			if karma < 10:
-				item.report()
-				item.reply(karma_warning)
-				save()
-				return False
-		return True
+    def verify(item):
+        karma = item.author.link_karma + item.author.comment_karma
+        age = (datetime.utcnow() - 
+			   datetime.utcfromtimestamp(item.author.created_utc)).days
 
-	def values(item):
-		if not item.author_flair_css_class or 'none' in item.author_flair_css_class:
-			item.author_flair_css_class = 'i-1'
-		elif (item.author_flair_css_class and
-		      any(ignore in item.author_flair_css_class
-		          for ignore in ['mod', 'bot', 'mookzs', 'vendor'])):
-			pass
-		else:
-			try:
-				item.author_flair_css_class = ('i-%d' % (int(
-				    ''.join([c for c in item.author_flair_css_class
-				             if c in '0123456789'])) + 1))
-			except:
-				logging.error('Failed to set flair for user with flair class "%s".'
-				              % item.author_flair_css_class)
-		if not item.author_flair_text:
-			item.author_flair_text = ''
+        if numeric_flair(item) < 1:
+            if age < age_restriction:
+                item.report()
+                item.reply(age_warning)
+                save()
+                return False
+            if karma < age_warning:
+                item.report()
+                item.reply(karma_warning)
+                save()
+                return False
+        return True
 
-	def flair(item):
-		if item.author_flair_css_class != 'i-mod':
-			item.subreddit.set_flair(item.author, item.author_flair_text, item.author_flair_css_class)
-			logging.info('Set ' + item.author.name + '\'s flair to ' + item.author_flair_css_class)
+    def values(item):
+        if not item.author_flair_css_class or 'none' in item.author_flair_css_class:
+            item.author_flair_css_class = 'i-1'
+        elif (item.author_flair_css_class and
+              any(ignore in item.author_flair_css_class
+                  for ignore in ['mod', 'bot', 'mookzs', 'vendor'])):
+            pass
+        else:
+            try:
+                item.author_flair_css_class = 'i-%d' % (numeric_flair(item) + 1)
+            except:
+                logging.error('Failed to set flair for user with flair class "%s".'
+                              % item.author_flair_css_class)
+        print item.author_flair_css_class
+        if not item.author_flair_text:
+            item.author_flair_text = ''
 
-		for com in flat_comments:
-			if hasattr(com.author, 'name'):
-				if com.author.name == item.author.name:
-					com.author_flair_css_class = item.author_flair_css_class
+    def flair(item):
+        if item.author_flair_css_class != 'i-mod':
+            item.subreddit.set_flair(item.author, item.author_flair_text, item.author_flair_css_class)
+            logging.info('Set ' + item.author.name + '\'s flair to ' + item.author_flair_css_class)
 
-	def save():
-		with open (link_id+".log", 'a') as myfile:
-				myfile.write('%s\n' % comment.id)
+        for com in flat_comments:
+            if hasattr(com.author, 'name'):
+                if com.author.name == item.author.name:
+                    com.author_flair_css_class = item.author_flair_css_class
 
-	while True:
-		try:
-			# Reload cfg file
-			cfg_file.read(path_to_cfg)
+    def save():
+        with open (link_id + ".log", 'a') as myfile:
+                myfile.write('%s\n' % comment.id)
 
-			# Load old comments
-			with open (link_id+".log", 'a+') as myfile:
-				completed = myfile.read()
+    while True:
+        try:
+            # Reload cfg file
+            cfg_file.read(path_to_cfg)
 
-			# Log in
-			logging.info('Logging in as /u/'+username)
-			if multiprocess == 'true':
-				handler = MultiprocessHandler()
-				r = praw.Reddit(user_agent=username, handler=handler)
-			else:
-				r = praw.Reddit(user_agent=username)
-			r.login(username, password)
+            # Load old comments
+            with open (link_id + ".log", 'a+') as myfile:
+                completed = myfile.read()
 
-			# Get the submission and the comments
-			submission = r.get_submission(submission_id=link_id)
-			submission.replace_more_comments(limit=None, threshold=0)
-			flat_comments = list(praw.helpers.flatten_tree(submission.comments))
+            # Log in
+            logging.info('Logging in as /u/' + username)
+            if multiprocess == 'true':
+                from praw.handlers import MultiprocessHandler
+                handler = MultiprocessHandler()
+                r = praw.Reddit(user_agent=username, handler=handler)
+            else:
+                r = praw.Reddit(user_agent=username)
+            r.login(username, password)
 
-			for comment in flat_comments:
+            # Get the submission and the comments
+            submission = r.get_submission(submission_id=link_id)
+            submission.replace_more_comments(limit=None, threshold=0)
+            flat_comments = list(praw.helpers.flatten_tree(submission.comments))
 
-				if not conditions():
-					continue
-				parent = [com for com in flat_comments if com.fullname == comment.parent_id][0]
-				if not check_self_reply():
-					continue
+            for comment in flat_comments:
 
-				# Check Account Age and Karma
-				if not verify(comment):
-					continue
-				if not verify(parent):
-					continue
+                if not conditions():
+                    continue
+                parent = [com for com in flat_comments
+						  if com.fullname == comment.parent_id][0]
+                if not check_self_reply(comment):
+                    continue
 
-				# Get Future Values to Flair
-				values(comment)
-				values(parent)
+                # Check Account Age and Karma
+                if not verify(comment):
+                    continue
+                if not verify(parent):
+                    continue
 
-				# Flairs up in here
-				flair(comment)
-				flair(parent)
-				comment.reply(added_msg)
-				save()
+                # Get Future Values to Flair
+                values(comment)
+                values(parent)
 
-		except Exception as e:
-			logging.error(e)
+                # Flairs up in here
+                flair(comment)
+                flair(parent)
+                comment.reply(added_msg)
+                save()
 
-		sleep(float(cfg_file.get('trade', 'sleep')))
+        except Exception as e:
+            logging.error(e)
+
+        sleep(float(cfg_file.get('trade', 'sleep')))
 
 if __name__ == '__main__':
-	main()
+    main()

@@ -1,9 +1,11 @@
-import sys, os
 from ConfigParser import SafeConfigParser
+from time import sleep
 import logging
+import os
 import praw
 import re
-from time import sleep, time
+import sys
+
 
 # load config file
 containing_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -16,6 +18,7 @@ subreddit = cfg_file.get('reddit', 'subreddit')
 link_id = cfg_file.get('heatware', 'link_id')
 respond = cfg_file.get('heatware', 'respond')
 regex = cfg_file.get('heatware', 'regex')
+group = int(cfg_file.get('heatware', 'group'))
 multiprocess = cfg_file.get('reddit', 'multiprocess')
 
 # Configure logging
@@ -25,44 +28,44 @@ requests_log.setLevel(logging.WARNING)
 
 
 def main():
-	while True:
-		try:
-			logging.info('Logging in as /u/'+username)
-			if multiprocess == 'true':
-				handler = MultiprocessHandler()
-				r = praw.Reddit(user_agent=username, handler=handler)
-			else:
-				r = praw.Reddit(user_agent=username)
-			r.login(username, password)
+    while True:
+        try:
+            logging.info('Logging in as /u/' + username)
+            if multiprocess == 'true':
+                from praw.handlers import MultiprocessHandler
+                handler = MultiprocessHandler()
+                r = praw.Reddit(user_agent=username, handler=handler)
+            else:
+                r = praw.Reddit(user_agent=username)
+            r.login(username, password)
+            flaircount = 0
 
-			flaircount = 0
+            # Get the submission and the comments
+            submission = r.get_submission(submission_id=link_id)
+            for comment in submission.comments:
+                if not hasattr(comment, 'author'):
+                    continue
+                if comment.is_root == True:
+                    logging.info('Parsing comment from /u/%s.' % comment.author)
+                    heatware = re.search(regex, comment.body)
+                    if heatware:
+                        url = heatware.group(group)
+                        if not comment.author_flair_text:
+                            flaircount = flaircount + 1
+                            if comment.author_flair_css_class:
+                                comment.subreddit.set_flair(comment.author, url, comment.author_flair_css_class)
+                            else:
+                                comment.subreddit.set_flair(comment.author, url, 'i-none')
+                        if respond == 'true':
+                            comment.reply('added')
+            if flaircount > 0:
+                logging.info('Set flair for ' + str(flaircount) + ' user(s)!')
 
-			# Get the submission and the comments
-			submission = r.get_submission(submission_id=link_id)
+        except Exception as e:
+            logging.error(e)
+            break
 
-			for comment in submission.comments:
-				if not hasattr(comment, 'author'):
-					continue
-				if comment.is_root == True:
-					heatware = re.search(regex, comment.body)
-					if heatware:
-						url = heatware.group(0)
-						if not comment.author_flair_text:
-							flaircount = flaircount + 1
-							if comment.author_flair_css_class:
-								comment.subreddit.set_flair(comment.author, url, comment.author_flair_css_class)
-							else:
-								comment.subreddit.set_flair(comment.author, url, 'i-none')
-						if respond == 'yes':
-							comment.reply('added')
-			if flaircount > 0:
-				logging.info('Set flair for '+str(flaircount)+' user(s)!')
-
-		except Exception as e:
-			logging.error(e)
-			break
-
-		sleep(600)
+        sleep(600)
 
 if __name__ == '__main__':
-	main()
+    main()
