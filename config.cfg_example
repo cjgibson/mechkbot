@@ -1,6 +1,7 @@
 [reddit]
-username = YOUR_REDDIT_USERNAME_HERE
-password = YOUR_REDDIT_PASSWORD_HERE
+user_agent = YOUR_BOT_USER_AGENT_HERE
+client_id = YOUR_APPLICATION_ID_HERE
+client_secret = YOUR_APPLICATION_SECRET_HERE
 subreddit = YOUR_SUBREDDIT_NAME_HERE
 multiprocess = false
 verbose = false
