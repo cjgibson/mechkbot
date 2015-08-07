@@ -1,35 +1,59 @@
 ###
-# AUTHORS: CHRISTIAN GIBSON,
+# __AUTHORS__: CHRISTIAN GIBSON,
 # PROJECT: /r/MechMarket Bot
-# UPDATED: AUGUST 05, 2015
+# UPDATED: AUGUST 06, 2015
 # USAGE:   python bot.py
-# EXPECTS: python 2.7.8
+# EXPECTS: python 3.4.0
+#          beautifulsoup4 4.4.0
+#          regex 2015.06.24
 ###
 
-import ConfigParser
+import argparse
+import bs4
 import cmd
+import configparser
+import copy
 import datetime
 import errno
+import logging
 import praw
 import regex
 import shelve
+import shutil
+import urllib
 
+
+__AUTHORS__ = ['NotMelAndNoGuitars']
+__VERSION__ = 0.1
+_BS4_PARSER = 'html.parser'
+logger = logging.getLogger()
+logger.setLevel(logging.WARNING)
 
 class bot_prompt(cmd.Cmd):
-        pass
+    def __init__(self):
+        super(self.__class__, self).__init__()
+        self.prompt = '>>> '
+        self.size = shutil.get_terminal_size()
+        self.height, self.width = self.size.lines, self.size.columns
 
 class bot(praw.Reddit):
-    def __init__(self, conf_file='config.cfg'):
+    def __init__(self, conf_file='config.cfg', log_file='record.log'):
         self.config_handler = config_handler(conf_file)
+        if log_file:
+            log = logging.StreamHandler(log_file)
+            fmt = logging.Formatter(self.config_handler.get_log_format())
+            log.setLevel(logging.DEBUG)
+            log.setFormatter(fmt)
+            logger.addHandler(log)
         super(self.__class__, self).__init__(
                                 self.config_handler.get_user_agent())
         self.set_oauth_app_info(self.config_handler.get_client_id(),
                                 self.config_handler.get_client_secret(),
                                 self.config_handler.get_redirect_url())
 
-class config_handler(ConfigParser.SafeConfigParser):
+class config_handler(configparser.SafeConfigParser):
     def __init__(self, conf_file):
-        ConfigParser.SafeConfigParser.__init__(self)
+        super(self.__class__, self).__init__()
         self.conf_file = conf_file
         self.true_values = frozenset(['t', 'true', '1'])
         self.heatware_regex = None
@@ -103,6 +127,16 @@ class config_handler(ConfigParser.SafeConfigParser):
         self.add_section('crawl')
         self.set('crawl', 'file', 'DATABASE_FILE_NAME')
         self.set('crawl', 'sleep', 'TIME_TO_WAIT_BETWEEN_CRAWLS_IN_SECONDS')
+        
+        self.add_section('monitor')
+        self.set('monitor', 'log', 'PATH_FOR_LOG_FILE_HERE')
+        self.set('monitor', 'new', 'MONITOR_NEW_USER_POSTS-true_false')
+        self.set('monitor', 'crawl', 'RECORD_USER_HEATWARE_HISTORY-true_false')
+        self.set('monitor', 'record', 'RECORD_USER_TRADE_HISTORY-true_false')
+        self.set('monitor', 'format',
+                 '%(created)d -- %(levelname)s \t-> %(message)s')
+        self.set('monitor', 'summary', 'PROVIDE_USER_HISTORY_SUMMARY-true_false')
+        self.set('monitor', 'respond', 'PROVIDE_HISTORY_THROUGH_PM-true_false')
         
         self.add_section('trade')
         self.set('trade', 'id', '')
@@ -218,6 +252,28 @@ class config_handler(ConfigParser.SafeConfigParser):
     def get_sleep_interval(self):
         return self.protected_pull('crawl', 'sleep', float)
     
+    ''' Configuration details for handling user history '''
+    def get_log_file_path(self):
+        return self.protected_pull('monitor', 'log')
+    
+    def monitor_new_posts(self):
+        return self.protected_pullboolean('monitor', 'new')
+    
+    def monitor_external(self):
+        return self.protected_pullboolean('monitor', 'crawl')
+    
+    def get_log_format(self):
+        return self.protected_pull('monitor', 'format')
+    
+    def record_history(self):
+        return self.protected_pullboolean('monitor', 'record')
+    
+    def post_summary(self):
+        return self.protected_pullboolean('monitor', 'summary')
+    
+    def reply_summary(self):
+        return self.protected_pullboolean('monitor', 'respond')
+    
     ''' Configuration details for analyzing trade threads '''
     def get_trade_thread_id(self):
         return self.protected_pull('trade', 'id')
@@ -301,7 +357,145 @@ class database_handler(shelve.DbfilenameShelf):
         super(self.__class__, self).__init__(filename=data_file)
 
 class heatware_crawler():
-    pass
+    def __init__(self, deep_parse=False, page_wait=1 * 60, rand_wait=False):
+        self.deep_parse = deep_parse
+        self.page_wait = page_wait
+        self.rand_wait = rand_wait
+        self.get_page = urllib.request.urlopen
+        self.root_page = 'www.heatware.com/eval.php?id='
+        self.page_ext = '&pagenum=%i'
+        self.eval_ext = '&num_days=%i'
+        self.info_dict = {'deep_parse': self.deep_parse,
+                          'rating': {'positive': 0,
+                                     'neutral': 0,
+                                     'negative': 0},
+                          'aliases': {},
+                          'location': None,
+                          'evaluations': []}
+        self.subhead_map = {'Evaluation Summary': {'function': self._summary,
+                                                   'key': 'rating'},
+                            'User Information': {'function': self._information,
+                                                 'key': 'location'},
+                            'Aliases': {'function': self._aliases,
+                                        'key': 'aliases'},
+                            'Evaluations': {'function': self._evaluations,
+                                            'key': 'evaluations'}}
+        self.text_clean = regex.compile(r'\s+', regex.UNICODE)
+        self.date_clean = regex.compile(r'\d{2}-\d{2}-\d{4}', regex.UNICODE)
+    
+    def parse(self, url):
+        info = copy.deepcopy(self.info_dict)
+        page = self.get_page(url)
+        html = str(page.read())
+        soup = bs4.BeautifulSoup(html, _BS4_PARSER)
+        for subhead in soup.find_all(class_='subhead'):
+            if subhead.text in self.subhead_map:
+                try:
+                    info[self.subhead_map[subhead.text]['key']] = (
+                        self.subhead_map[subhead.text]['function'](subhead,
+                                                                   soup))
+                except:
+                    info[self.subhead_map[subhead.text]['key']] = (copy.deepcopy(
+                        self.info_dict[self.subhead_map[subhead.text]['key']]))
+            else:
+                print(subhead.text)
+                
+        return info
+    
+    def parse_id(self, id):
+        return self.parse(self.root_page + str(id))
+    
+    def _summary(self, spoonful, soup):
+        root = spoonful.parent
+        scores = root.find_all(class_='num')
+        summary = {}
+        for idx, item in enumerate(['positive', 'neutral', 'negative']):
+            try:
+                summary[item] = int(scores[idx].text)
+            except:
+                summary[item] = None
+        return summary
+    
+    def _information(self, spoonful, soup):
+        root = spoonful.parent
+        info = root.find_all('div')
+        for idx in range(len(info) - 1):
+            prior, label = info[idx], info[idx + 1]
+            if label.text == 'Location':
+                return prior.text
+        return None
+    
+    def _aliases(self, spoonful, soup):
+        root = spoonful.parent
+        links = {}
+        for link in root.find_all('a', href=True):
+            links[link.text] = link.get('href')
+        return links
+    
+    def _evaluations(self, spoonful, soup):
+        root = spoonful.parent
+        evals = []
+        for evalu in root.find_all(id=regex.compile(r'rp_[0-9]+')):
+            info = {'id': int(evalu.get('id').strip('rp_'))}
+            
+            try:
+                info['user'] = self._clean(evalu.find('td').text)
+            except:
+                info['user'] = None
+            
+            try:
+                info_string = soup.find(id=('row_%i' % info['id'])).text
+                date_match = self.date_clean.search(info_string)
+                info['date'] = self._clean(date_match.group(0))
+                date_span = date_match.span(0)
+            except:
+                info['date'] = None
+                date_span = None
+            
+            if date_span:
+                try:
+                    info['forum'] = self._clean(info_string[date_span[1]:])
+                except:
+                    info['forum'] = None
+            else:
+                info['forum'] = None
+            
+            try:
+                for inner in evalu.find_all('strong'):
+                    if 'Comments' in inner.text:
+                        info['comments'] = self._clean(inner.parent.text.split(None, 1)[1])
+            except:
+                info['comments'] = None
+            
+            evals.append(info)
+        return evals
+    
+    def _clean(self, text):
+        _text = text.replace('\\t', '\t').replace('\\r', '\r').replace('\\n', '\n')
+        return self.text_clean.sub(' ', _text)
 
 if __name__ == '__main__':
-    bot_prompt().cmdloop()
+    def coerce_reddit_handles():
+        clean = regex.compile(r'[^A-Z0-9_/-]', regex.UNICODE + regex.IGNORECASE)
+        authors = []
+        for author in __AUTHORS__:
+            author = clean.sub('', str(author))
+            if author.startswith('/u/') or author.startswith('/r/'):
+                authors.append(author)
+            else:
+                authors.append('/u/' + max(author.split('/'), key=len))
+        return authors
+    
+    parser = argparse.ArgumentParser(description=('Automates flair monitoring '
+                                                  "for reddit's trading "
+                                                  'subreddits.'),
+                                     epilog=('Currently maintained by ' + 
+                                             ', '.join(coerce_reddit_handles()) + 
+                                             '.'))
+    parser.add_argument('-ns', '--no-shell', action='store_true',
+                        help='run the bot without its shell')
+    args = parser.parse_args()
+    if args.no_shell:
+        bot()
+    else:
+        bot_prompt().cmdloop()
