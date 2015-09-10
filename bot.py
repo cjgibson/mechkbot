@@ -332,19 +332,43 @@ class bot(praw.Reddit):
         'sidebar': collections.OrderedDict([
             ('add_button', {'def': 'false',
                             'get': 'should_add_button',
+                            'desc': ('Whether the bot should add a button for '
+                                     'the current trade thread on the target '
+                                     'subreddit\'s sidebar.'),
                             'boolean': True}),
-            ('button_text', {}),
-            ('button_start', {}),
-            ('button_end', {})
+            ('button_text', {'desc': 'The text used for the created button.'}),
+            ('button_start', {'desc': ('A specialized tag, included in the '
+                                       'sidebar\'s text, which determines '
+                                       'where the button starts.')}),
+            ('button_end', {'desc': ('A specialized tag, included in the '
+                                     'sidebar\'s text, which determines where '
+                                     'the button ends.')})
         ]),
         'flair': collections.OrderedDict([
             ('use', {'def': 'true',
+                     'desc': 'If the bot should monitor and update user flair.',
                      'boolean': True}),
-            ('start', {}),
-            ('limit', {}),
-            ('ignore', {}),
-            ('pattern', {}),
-            ('increment', {})
+            ('start', {'desc': 'Flair given to users never seen before.'}),
+            ('limit', {'desc': ('Maximum integer indicating how many times '
+                                'a user\'s flair can be incremented.')}),
+            ('ignore', {'desc': ('A pipe-separated ("|") list of flairs which '
+                                 'should be ignored if encountered by the bot.')}),
+            ('pattern', {'desc': ('The pattern used to generate new user '
+                                  'flair, following an increment. %i is used '
+                                  'to indicate where the integer value of the '
+                                  'flair should go. As a example, a flair '
+                                  'pattern of "u-%i" would take on the values '
+                                  '"u-1" for a user with a flair value of 1, '
+                                  '"u-2" for a user with a flair value of 2, '
+                                  '"u-3" for a user with a flair value of 3, '
+                                  'etc.')}),
+            ('increment', {'def': '1',
+                           'desc': ('The integer value that a user\'s flair '
+                                    'value will be incremented by with each '
+                                    'flair increment. Given a default value '
+                                    'of "1", a user with a flair value of 3 '
+                                    'would advance to a flair value of 4 after '
+                                    'completing a trade.')})
         ]),
         'trade': collections.OrderedDict([
             ('method', {'def': 'post'}),
