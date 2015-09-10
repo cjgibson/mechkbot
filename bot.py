@@ -21,6 +21,7 @@ import inspect
 import logging
 import math
 import os
+import platform
 import praw
 import random
 import regex
@@ -30,10 +31,31 @@ import threading
 import time
 import traceback
 import urllib
+import uuid
 
 
 __AUTHORS__ = ['/u/NotMelNoGuitars']
 __VERSION__ = 0.1
+__INFO__ = 'MechKBot-v%s on "%s" with << %s v%s >> at %s %s' % (
+    __VERSION__,
+    platform.platform(),
+    platform.python_implementation(),
+    platform.python_version(),
+    time.ctime(),
+    time.localtime().tm_zone)
+
+
+def coerce_reddit_handles():
+    clean = regex.compile(r'[^A-Z0-9_/-]',
+                          regex.UNICODE + regex.IGNORECASE)
+    authors = []
+    for author in __AUTHORS__:
+        author = clean.sub('', str(author))
+        if author.startswith('/u/') or author.startswith('/r/'):
+            authors.append(author)
+        else:
+            authors.append('/u/' + max(author.split('/'), key=len))
+    return authors
 
 
 class config_generator():
@@ -204,42 +226,117 @@ class bot(praw.Reddit):
 
     CONFIG_DEFAULTS = {
         'crawl': collections.OrderedDict([
-            ('file', {'def': 'data.record'}),
-            ('sleep', {'def': '300'})]),
+            ('file', {'def': 'data.record',
+                      'desc': ('This is the name of the flatfile that will be '
+                               'used to store all collected data on a user-by-'
+                               'user basis.')}),
+            ('hold', {'def': '10',
+                      'desc': ('This is the number of seconds the bot will '
+                               'spend in each state as a minimum.\nAs an '
+                               'example, the bot has three states by default:\n'
+                               ' 1. Crawling /new of the target subreddit.\n'
+                               ' 2. Responding to user PMs.\n'
+                               ' 3. Crawling the trade thread of the target '
+                               'subreddit.')}),
+            ('sleep', {'def': '100',
+                       'desc': ('This is the number of seconds the bot will '
+                                'spend doing nothing after completing each set '
+                                'of states.')})
+        ]),
         'reddit': collections.OrderedDict([
-            ('user_agent', {}),
-            ('client_id', {}),
-            ('client_secret', {}),
-            ('redirect_url', {}),
-            ('subreddit', {}),
+            ('user_agent', {'def': ('%s-%s:%s:MechKBot-v%s (by %s)' %
+                                    (platform.system(), platform.processor(),
+                                     uuid.uuid5(uuid.NAMESPACE_OID, __INFO__),
+                                     __VERSION__,
+                                     ', '.join(coerce_reddit_handles()))),
+                            'desc': ('This is the plaintext string that will '
+                                     'be used by the admin\'s at reddit to '
+                                     'identify this bot. It is recommended '
+                                     'that bots follow the format:\n'
+                                     '  <platform>:<app ID>:<version string> '
+                                     '(by /u/<reddit username>)\n'
+                                     'Full rules and restrictions can be '
+                                     'found here: https://github.com/reddit/'
+                                     'reddit/wiki/API.')}),
+            ('client_id', {'desc': ('This is the OAuth2 client_id created '
+                                    'for your reddit app instance.')}),
+            ('client_secret', {'desc': ('This is the OAuth2 client_secret '
+                                        'created for your reddit app instance.')}),
+            ('redirect_url', {'desc': ('This is the OAuth2 redirect_url created '
+                                       'for your reddit app instance.')}),
+            ('subreddit', {'desc': 'The subreddit targeted by this bot.'}),
             ('multiprocess', {'def': 'false',
                               'get': 'is_multiprocessed',
                               'set': None,
+                              'desc': 'Currently not implemented. Ignore.',
                               'boolean': True}),
             ('verbose', {'def': 'true',
-                                'get': 'is_verbose',
-                                'set': 'set_verbose',
-                                'boolean': True})]),
+                         'get': 'is_verbose',
+                         'set': 'set_verbose',
+                         'desc': ('Sets whether the bot will display its '
+                                  'actions during runtime, or simply log them.'),
+                         'boolean': True})
+        ]),
         'monitor': collections.OrderedDict([
-            ('log', {'def': 'record.log'}),
+            ('log', {'def': 'event.log',
+                     'desc': ('This is the flatfile that will be used to log '
+                              'all actions taken by the bot.')}),
             ('posts', {'def': 'true',
+                       'desc': ('Whether or not the bot will log basic '
+                                'information concerning all posts observed '
+                                'during its runtime.'),
                        'boolean': True}),
-            ('record', {'def': 'true',
-                        'boolean': True}),
-            ('format', {'def': '%(created)d -- %(levelname)s -> %(message)s'}),
-            ('summary', {'def': 'false',
-                         'boolean': True}),
-            ('respond', {'def': 'true',
-                         'boolean': True}),
-            ('heatware', {'def': 'true',
-                          'boolean': True})]),
+            ('format', {'def': '%(created)f -- %(levelname)s -> %(message)s',
+                        'desc': ('This is the format string that will be used '
+                                 'in creating each entry in the log file. '
+                                 'Formatting options include:\n'
+                                 ' %(asctime)s: Human-readable time when a '
+                                 'logged event was created.\n'
+                                 ' %(created)f: Seconds since epoch when a '
+                                 'logged event was created.\n'
+                                 ' %(filename)s: Source file that created a '
+                                 'logged event.\n'
+                                 ' %(funcName)s: Function used that created a '
+                                 'logged event.\n'
+                                 ' %(levelname)s: Severity of logged event as '
+                                 'an English string.\n'
+                                 ' %(levelno)s: Severity of logged event as a '
+                                 'numeric value.\n'
+                                 ' %(lineno)d: Line number of the source file '
+                                 'where a logged event was created.\n'
+                                 ' %(module)s: Module that created a logged '
+                                 'event.\n'
+                                 ' %(msecs)d: Millisecond portion of system '
+                                 'time when event was logged.\n'
+                                 ' %(message)s: Message provided when event was'
+                                 ' logged.\n'
+                                 ' %(name)s: Name of the logger used to create '
+                                 'the logged event.\n'
+                                 ' %(pathname)s: Full pathname of the source '
+                                 'file that created the logged event.\n'
+                                 ' %(process)d: Process ID that created the '
+                                 'logged event.\n'
+                                 ' %(processName)s: Process Name that created '
+                                 'the logged event.\n'
+                                 ' %(relativeCreated)d: Milliseconds after the '
+                                 'logging module was initially loaded that an '
+                                 'event was logged.\n'
+                                 ' %(thread)d: Thread ID that created the '
+                                 'logged event.\n'
+                                 ' %(threadName)s: Thread Name that created '
+                                 'the logged event.\n'
+                                 'Further information can be found at-- '
+                                 'https://docs.python.org/3.4/library/logging.'
+                                 'html#logging.LogRecord\n')}),
+        ]),
         'sidebar': collections.OrderedDict([
             ('add_button', {'def': 'false',
                             'get': 'should_add_button',
                             'boolean': True}),
             ('button_text', {}),
             ('button_start', {}),
-            ('button_end', {})]),
+            ('button_end', {})
+        ]),
         'flair': collections.OrderedDict([
             ('use', {'def': 'true',
                      'boolean': True}),
@@ -247,7 +344,8 @@ class bot(praw.Reddit):
             ('limit', {}),
             ('ignore', {}),
             ('pattern', {}),
-            ('increment', {})]),
+            ('increment', {})
+        ]),
         'trade': collections.OrderedDict([
             ('method', {'def': 'post'}),
             ('post_id', {}),
@@ -266,7 +364,8 @@ class bot(praw.Reddit):
             ('same_msg', {}),
             ('karma_msg', {}),
             ('karma_type', {'def': 'comment'}),
-            ('karma_limit', {'def': '100'})]),
+            ('karma_limit', {'def': '100'})
+        ]),
         'heatware': collections.OrderedDict([
             ('method', {'def': 'pm'}),
             ('post_id', {}),
@@ -282,7 +381,9 @@ class bot(praw.Reddit):
                        'set': None}),
             ('respond', {'def': 'true',
                          'boolean': True}),
-            ('response', {})])}
+            ('response', {})
+        ])
+    }
 
     def __init__(self, conf_file=None):
         config_constructor = _GET_CONFIG(self.CONFIG_DEFAULTS)
@@ -297,17 +398,17 @@ class bot(praw.Reddit):
                                      os.strerror(self.status))),
                                    conf_file)
         log = logging.StreamHandler(self.config_handler.get_monitor_log())
-        fmt = logging.Formatter(self.config_handler.get_log_format())
+        fmt = logging.Formatter(self.config_handler.get_monitor_format())
         log.setLevel(logging.DEBUG)
         log.setFormatter(fmt)
         logger.addHandler(log)
         self.data_store = database_handler(
             self.config_handler.get_crawl_file())
         super(self.__class__, self).__init__(
-            self.config_handler.get_user_agent())
-        self.set_oauth_app_info(self.config_handler.get_client_id(),
-                                self.config_handler.get_client_secret(),
-                                self.config_handler.get_redirect_url())
+            self.config_handler.get_reddit_user_agent())
+        self.set_oauth_app_info(self.config_handler.get_reddit_client_id(),
+                                self.config_handler.get_reddit_client_secret(),
+                                self.config_handler.get_reddit_redirect_url())
 
 
 class database_handler(shelve.DbfilenameShelf):
@@ -498,18 +599,6 @@ class heatware_crawler():
         return self.text_clean.sub(' ', _text)
 
 if __name__ == '__main__':
-    def coerce_reddit_handles():
-        clean = regex.compile(r'[^A-Z0-9_/-]',
-                              regex.UNICODE + regex.IGNORECASE)
-        authors = []
-        for author in __AUTHORS__:
-            author = clean.sub('', str(author))
-            if author.startswith('/u/') or author.startswith('/r/'):
-                authors.append(author)
-            else:
-                authors.append('/u/' + max(author.split('/'), key=len))
-        return authors
-
     parser = argparse.ArgumentParser(description=('Automates flair monitoring '
                                                   "for reddit's trading "
                                                   'subreddits.'),

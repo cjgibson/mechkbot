@@ -1,5 +1,7 @@
 ### MechKBot-Specific Files ###
 config.cfg
+data.record
+event.log
 *.log
 
 # Created by https://www.gitignore.io
