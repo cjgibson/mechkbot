@@ -371,24 +371,101 @@ class bot(praw.Reddit):
                                     'completing a trade.')})
         ]),
         'trade': collections.OrderedDict([
-            ('method', {'def': 'post'}),
-            ('post_id', {}),
-            ('post_text', {}),
-            ('post_rate', {'def': 'monthly'}),
-            ('post_title', {}),
-            ('post_sticky', {'def': 'false'}),
-            ('message_text', {}),
-            ('message_title', {}),
-            ('respond', {'def': 'false',
+            ('method', {'def': 'post',
+                        'desc': ('The method used by the bot to confirm user '
+                                 'trades. Three options are available, "pm", '
+                                 '"post", or "both". If "pm" is specified, '
+                                 'trades will be confirmed via private '
+                                 'message; with the sender in a trade sending '
+                                 'a private message to the bot containing the '
+                                 'reddit handle of the recipient. The bot then '
+                                 'contacts the other party, who confirms the '
+                                 'trade. If "post" is specified, a public '
+                                 'thread is used. Within the thread, the '
+                                 'sender creates a top-level comment, which '
+                                 'the recipient replies to with a comment '
+                                 'containing the phrase "confirmed". In the '
+                                 'case that "both" is specified, either option '
+                                 'can be used to confirm a trade.')}),
+            ('post_id', {'def': None,
+                         'desc': ('The id used by the trading thread within '
+                                  'the target subreddit. If left blank, the '
+                                  'bot will create its own trading thread. In '
+                                  'the case that "pm" is used as a method, '
+                                  'this value is ignored.')}),
+            ('post_text', {'desc': ('The text template used when creating a '
+                                    'new trade thread. Supports formatting '
+                                    'arguments as found in Python\'s strftime '
+                                    'command. For more information, see: '
+                                    'https://docs.python.org/2/library/time.html'
+                                    '#time.strftime.')}),
+            ('post_rate', {'def': 'monthly',
+                           'desc': ('The rate at which the bot will create '
+                                    'new trading posts on the target subreddit.'
+                                    ' Provided options include "daily", '
+                                    '"weekly", "monthly", "yearly", and "never"'
+                                    '. If "never" is selected, the post_id will'
+                                    ' have to be updated manually by the user.')}),
+            ('post_title', {'desc': ('The text template used when creating a '
+                                     'new trade thread\'s title. Supports '
+                                     'formatting arguments as found in Python\'s'
+                                     'strftime command. For more information, '
+                                     'see: https://docs.python.org/2/library/'
+                                     'time.html#time.strftime.')}),
+            ('post_sticky', {'def': 'false',
+                             'desc': ('If the bot makes the trade thread sticky'
+                                      ' or not.')}),
+            ('post_response', {'desc': ('The text template used when replying '
+                                        'to a confirmed trade comment on a '
+                                        'trade post. Supports formatting '
+                                        'arguments as found in Python\'s '
+                                        'strftime command. For more information'
+                                        ', see: https://docs.python.org/2/'
+                                        'library/time.html#time.strftime.')}),
+            ('message_text', {'desc': ('The text template used when sending a '
+                                       'private message to both users following'
+                                       ' a confirmed trade. Supports formatting'
+                                       ' arguments as found in Python\'s '
+                                       'strftime command. For more information,'
+                                       ' see: https://docs.python.org/2/library'
+                                       '/time.html#time.strftime.')}),
+            ('message_title', {'desc': ('The text template used when sending a '
+                                        'private message to both users '
+                                        'following a confirmed trade. Supports '
+                                        'formatting arguments as found in '
+                                        'Python\'s strftime command. For more '
+                                        'information, see: https://docs.python.'
+                                        'org/2/library/time.html#time.strftime.')}),
+            ('respond', {'def': 'true',
+                         'desc': ('If the bot should respond following a '
+                                  'confirmed trade or not.'),
                          'boolean': True}),
-            ('response', {}),
-            ('age_msg', {}),
-            ('age_type', {'def': 'days'}),
-            ('age_limit', {'def': '30'}),
-            ('same_msg', {}),
-            ('karma_msg', {}),
-            ('karma_type', {'def': 'comment'}),
-            ('karma_limit', {'def': '100'})
+            ('age_msg', {'desc': ('Message used to reply when a user attempts '
+                                  'to confirm a trade when their account is '
+                                  'younger than the provided age limit.')}),
+            ('age_type', {'def': 'days',
+                          'desc': ('Units used in determining if a user\'s '
+                                   'account is too young to confirm a trade. '
+                                   'Options are "seconds", "minutes", "hours", '
+                                   '"days", "months".')}),
+            ('age_limit', {'def': '30',
+                           'desc': ('Numerical measurement used in determining '
+                                    'if a user\'s account is too young to '
+                                    'confirm a trade.')}),
+            ('same_msg', {'desc': ('Message used to reply when a user attempts '
+                                   'to confirm a trade with themselves.')}),
+            ('karma_msg', {'desc': ('Message used to reply when a user attempts'
+                                    ' to confirm a trade when their account\'s '
+                                    'karma is below the provided karma limit.')}),
+            ('karma_type', {'def': 'both',
+                            'desc': ('Units used in determining if a user\'s '
+                                     'account has sufficient karma to confirm '
+                                     'a trade. Options are "comment", "link", '
+                                     'or "both".')}),
+            ('karma_limit', {'def': '100',
+                             'desc': ('Numerical measurement used in '
+                                      'determining if a user\'s account has '
+                                      'sufficient karma to confirm a trade.')})
         ]),
         'heatware': collections.OrderedDict([
             ('method', {'def': 'pm'}),
