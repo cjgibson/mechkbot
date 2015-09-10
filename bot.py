@@ -1,8 +1,9 @@
+# -*- coding: utf-8 -*-
 ###
 # AUTHORS: CHRISTIAN GIBSON,
 # PROJECT: /r/MechMarket Bot
 # UPDATED: SEPTEMBER 5, 2015
-# USAGE:   python bot.py [-h / --help] [-ns / --no-shell]
+# USAGE:   python bot.py [-h / --help] [-is / --interactive-shell]
 # EXPECTS: python 3.4.0
 #          beautifulsoup4 4.4.0
 #          regex 2015.06.24
@@ -11,42 +12,47 @@
 import argparse
 import bs4
 import cmd
+import collections
 import configparser
 import copy
 import datetime
 import errno
 import inspect
 import logging
+import math
 import os
 import praw
 import random
 import regex
 import shelve
 import shutil
+import threading
 import time
+import traceback
 import urllib
 
 
+__AUTHORS__ = ['/u/NotMelNoGuitars']
+__VERSION__ = 0.1
+
+
 class config_generator():
-    _FUNC_CODE_ = """class config_handler(configparser.ConfigParser):
+    _FUNC_CODE_ = """class config_handler(configparser.RawConfigParser):
 
     def __init__(self, conf_file=None):
         super(self.__class__, self).__init__()
 
-        self.true_values = frozenset(['true', 't', '1', 'y', 'yes', 'aye'])
+        self.true_values = frozenset(['true', 't', '1', 'y', 'yes', 'aye', 'on',
+                                      'use', 'active', 'activate'])
         self.heatware_regex = None
 
         if conf_file:
-            try:
-                self.conf_file = os.path.abspath(conf_file)
-            except:
-                pass
+            self.conf_file = os.path.abspath(conf_file)
         else:
             try:
                 self.conf_file = (os.path.dirname(os.path.abspath(
-                    inspect.getsourcefile(lambda _: None))) + '/config.cfg')
+                    inspect.getsourcefile(lambda: None))) + os.sep + 'config.cfg')
             except:
-                self.status = errno.EBADFD
                 self.conf_file = None
 
         if self.conf_file:
@@ -58,7 +64,14 @@ class config_generator():
                 else:
                     self.status = 0
             except:
+                traceback.print_exc()
                 self.status = errno.EIO
+        else:
+            self.status = errno.EBADF
+    
+    def store(self):
+        with open(self.conf_file, 'w') as conf_handle:
+            self.write(conf_handle)
 
     def protected_pull(self, section, option, cast=None, default=None):
         if self.status:
@@ -95,6 +108,7 @@ class config_generator():
                                    self.conf_file)
         try:
             self.set(section, option, value)
+            self.store()
             return True
         except:
             return False
@@ -162,13 +176,14 @@ class config_generator():
                 except:
                     raise TypeError
 
-        added_methods['generate_defaults'] = '\n'.join(init_defaults) + '\n'
+        added_methods['generate_defaults'] = ('\n'.join(init_defaults) + '\n' +
+                                              '        self.store()\n')
         _func_code_ = self._FUNC_CODE_ + '\n'.join(added_methods.values())
         exec(compile(_func_code_, '<string>', 'exec'))
-        return eval('config_handler')
+        config = eval('config_handler')
+        config.func_code = _func_code_
+        return config
 
-__AUTHORS__ = ['/u/NotMelNoGuitars']
-__VERSION__ = 0.1
 _BS4_PARSER = 'html.parser'
 _GET_CONFIG = config_generator()
 logger = logging.getLogger()
@@ -188,83 +203,106 @@ class bot_prompt(cmd.Cmd):
 class bot(praw.Reddit):
 
     CONFIG_DEFAULTS = {
-        'crawl': {'file': {'def': 'data.record'},
-                  'sleep': {'def': '300'}},
-        'reddit': {'user_agent': {},
-                   'client_id': {},
-                   'client_secret': {},
-                   'redirect_url': {},
-                   'subreddit': {},
-                   'multiprocess': {'def': 'false',
-                                    'get': 'is_multiprocessed',
-                                    'set': None},
-                   'verbose': {'def': 'true',
-                               'get': 'is_verbose',
-                               'set': 'set_verbose'}},
-        'monitor': {'log': {'def': 'run.log'},
-                    'new': {'def': 'true'},
-                    'record': {'def': 'true'},
-                    'format': {'def': '%(created)d -- %(levelname)s \t-> %(message)s'},
-                    'summary': {'def': 'false'},
-                    'respond': {'def': 'true'},
-                    'heatware': {'def': 'true'}},
-        'sidebar': {'add_button': {'def': 'false',
-                                   'get': 'should_add_button'},
-                    'button_text': {},
-                    'button_start': {},
-                    'button_end': {}},
-        'flair': {'method': {'def': 'pm'},
-                  'post_id': {},
-                  'post_text': {},
-                  'post_rate': {'def': 'yearly'},
-                  'post_title': {},
-                  'post_sticky': {'def': 'false'},
-                  'message_text': {},
-                  'message_title': {},
-                  'use': {'def': 'true'},
-                  'start': {},
-                  'limit': {},
-                  'pattern': {},
-                  'increment': {}},
-        'trade': {'method': {'def': 'pm'},
-                  'post_id': {},
-                  'post_text': {},
-                  'post_rate': {'def': 'monthly'},
-                  'post_title': {},
-                  'post_sticky': {'def': 'false'},
-                  'message_text': {},
-                  'message_title': {},
-                  'respond': {'def': 'false'},
-                  'response': {},
-                  'age_msg': {},
-                  'age_type': {'def': 'days'},
-                  'age_limit': {'def': '30'},
-                  'same_msg': {},
-                  'karma_msg': {},
-                  'karma_type': {'def': 'comment'},
-                  'karma_limit': {'def': '100'}},
-        'heatware': {'method': {'def': 'pm'},
-                     'post_id': {},
-                     'post_text': {},
-                     'post_rate': {'def': 'yearly'},
-                     'post_title': {},
-                     'post_sticky': {},
-                     'message_text': {},
-                     'message_title': {},
-                     'regex': {'def': '(?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)'},
-                     'group': {'def': '1'},
-                     'respond': {},
-                     'response': {}}}
+        'crawl': collections.OrderedDict([
+            ('file', {'def': 'data.record'}),
+            ('sleep', {'def': '300'})]),
+        'reddit': collections.OrderedDict([
+            ('user_agent', {}),
+            ('client_id', {}),
+            ('client_secret', {}),
+            ('redirect_url', {}),
+            ('subreddit', {}),
+            ('multiprocess', {'def': 'false',
+                              'get': 'is_multiprocessed',
+                              'set': None,
+                              'boolean': True}),
+            ('verbose', {'def': 'true',
+                                'get': 'is_verbose',
+                                'set': 'set_verbose',
+                                'boolean': True})]),
+        'monitor': collections.OrderedDict([
+            ('log', {'def': 'record.log'}),
+            ('posts', {'def': 'true',
+                       'boolean': True}),
+            ('record', {'def': 'true',
+                        'boolean': True}),
+            ('format', {'def': '%(created)d -- %(levelname)s -> %(message)s'}),
+            ('summary', {'def': 'false',
+                         'boolean': True}),
+            ('respond', {'def': 'true',
+                         'boolean': True}),
+            ('heatware', {'def': 'true',
+                          'boolean': True})]),
+        'sidebar': collections.OrderedDict([
+            ('add_button', {'def': 'false',
+                            'get': 'should_add_button',
+                            'boolean': True}),
+            ('button_text', {}),
+            ('button_start', {}),
+            ('button_end', {})]),
+        'flair': collections.OrderedDict([
+            ('use', {'def': 'true',
+                     'boolean': True}),
+            ('start', {}),
+            ('limit', {}),
+            ('ignore', {}),
+            ('pattern', {}),
+            ('increment', {})]),
+        'trade': collections.OrderedDict([
+            ('method', {'def': 'post'}),
+            ('post_id', {}),
+            ('post_text', {}),
+            ('post_rate', {'def': 'monthly'}),
+            ('post_title', {}),
+            ('post_sticky', {'def': 'false'}),
+            ('message_text', {}),
+            ('message_title', {}),
+            ('respond', {'def': 'false',
+                         'boolean': True}),
+            ('response', {}),
+            ('age_msg', {}),
+            ('age_type', {'def': 'days'}),
+            ('age_limit', {'def': '30'}),
+            ('same_msg', {}),
+            ('karma_msg', {}),
+            ('karma_type', {'def': 'comment'}),
+            ('karma_limit', {'def': '100'})]),
+        'heatware': collections.OrderedDict([
+            ('method', {'def': 'pm'}),
+            ('post_id', {}),
+            ('post_text', {}),
+            ('post_rate', {'def': 'yearly'}),
+            ('post_title', {}),
+            ('post_sticky', {}),
+            ('message_text', {}),
+            ('message_title', {}),
+            ('regex', {'def': '(?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)',
+                       'set': None}),
+            ('group', {'def': '1',
+                       'set': None}),
+            ('respond', {'def': 'true',
+                         'boolean': True}),
+            ('response', {})])}
 
-    def __init__(self, conf_file='config.cfg', log_file='record.log'):
+    def __init__(self, conf_file=None):
         config_constructor = _GET_CONFIG(self.CONFIG_DEFAULTS)
         self.config_handler = config_constructor(conf_file)
-        if log_file:
-            log = logging.StreamHandler(log_file)
-            fmt = logging.Formatter(self.config_handler.get_log_format())
-            log.setLevel(logging.DEBUG)
-            log.setFormatter(fmt)
-            logger.addHandler(log)
+        if self.config_handler.status:
+            print("Configuration file is in invalid state.")
+            print("Run bot with --interactive-shell option to rectify.")
+            raise EnvironmentError(self.status,
+                                   ('Current status #%d <%s> "%s".' %
+                                    (self.status,
+                                     errno.errorcode[self.status],
+                                     os.strerror(self.status))),
+                                   conf_file)
+        log = logging.StreamHandler(self.config_handler.get_monitor_log())
+        fmt = logging.Formatter(self.config_handler.get_log_format())
+        log.setLevel(logging.DEBUG)
+        log.setFormatter(fmt)
+        logger.addHandler(log)
+        self.data_store = database_handler(
+            self.config_handler.get_crawl_file())
         super(self.__class__, self).__init__(
             self.config_handler.get_user_agent())
         self.set_oauth_app_info(self.config_handler.get_client_id(),
@@ -272,397 +310,85 @@ class bot(praw.Reddit):
                                 self.config_handler.get_redirect_url())
 
 
-class config_handler(configparser.SafeConfigParser):
-
-    def __init__(self, conf_file=None):
-        super(self.__class__, self).__init__()
-
-        self.true_values = frozenset(['true', 't', '1', 'y', 'yes', 'aye'])
-        self.heatware_regex = None
-
-        if conf_file:
-            self.conf_file = conf_file
-        else:
-            try:
-                self.conf_file = (os.path.dirname(os.path.abspath(
-                    inspect.getsourcefile(lambda _: None))) + 'config.cfg')
-            except:
-                self.status = errno.EBADFD
-                self.conf_file = None
-
-        if self.conf_file:
-            try:
-                self.read(self.conf_file)
-                if not self.sections():
-                    self.generate_defaults()
-                    self.status = errno.ENOENT
-                else:
-                    self.status = 0
-            except:
-                self.status = errno.EIO
-
-    def protected_pull(self, section, option, cast=None, default=None):
-        if self.status:
-            raise EnvironmentError(self.status,
-                                   ('Current status #%d <%s> "%s".' %
-                                    (self.status,
-                                     errno.errorcode[self.status],
-                                     os.strerror(self.status))),
-                                   self.conf_file)
-        try:
-            if cast:
-                return cast(self.get(section, option))
-            else:
-                return self.get(section, option)
-        except:
-            if default:
-                return default
-            else:
-                raise
-
-    def protected_pullboolean(self, section, option):
-        boolean = self.protected_pull(section, option).lower()
-        if boolean in self.true_values:
-            return True
-        return False
-
-    def protected_push(self, section, option, value):
-        if self.status:
-            raise EnvironmentError(self.status,
-                                   ('Current status #%d <%s> "%s".' %
-                                    (self.status,
-                                     errno.errorcode[self.status],
-                                     os.strerror(self.status))),
-                                   self.conf_file)
-        try:
-            self.set(section, option, value)
-            return True
-        except:
-            return False
-
-    def protected_pushboolean(self, section, option, value):
-        if value is True or value in self.true_values:
-            return self.protected_push(section, option, 'true')
-        return self.protected_push(section, option, 'false')
-
-    def generate_defaults(self):
-        self.add_section('reddit')
-        self.set('reddit', 'user_agent', 'YOUR_USER_AGENT_HERE')
-        self.set('reddit', 'client_id', 'YOUR_APPLICATION_ID_HERE')
-        self.set('reddit', 'client_secret', 'YOUR_APPLICATION_SECRET_HERE')
-        self.set('reddit', 'redirect_url', 'YOUR_APPLICATION_REDIRECT_HERE')
-        self.set('reddit', 'subreddit', 'YOUR_TARGET_SUBREDDIT_HERE')
-        self.set('reddit', 'multiprocess', 'false')
-        self.set('reddit', 'verbose', 'true')
-
-        self.add_section('sidebar')
-        self.set('sidebar', 'add_button', 'false')
-        self.set('sidebar', 'button_text', 'YOUR_BUTTON_TEXT_HERE')
-        self.set('sidebar', 'button_start', 'TAG_INDICATING_START_OF_BUTTON')
-        self.set('sidebar', 'button_end', 'TAG_INDICATING_END_OF_BUTTON')
-
-        self.add_section('post')
-        self.set('post', 'id', '')
-        self.set('post', 'text', 'YOUR_POST_TEXT_HERE')
-        self.set('post', 'rate', 'YOUR_POST_RATE_HERE-daily/monthly/yearly')
-        self.set('post', 'title', 'YOUR_POST_TITLE_HERE-SUPPORTS_STRFTIME')
-        self.set('post', 'sticky', 'false')
-        self.set('post', 'msg_title', 'MESSAGE_SENT_TO_MODS_WHEN_POST_CREATED')
-        self.set('post', 'msg_text', 'CONTENTS_OF_MESSAGE_SENT_TO_MODS')
-
-        self.add_section('flair')
-        self.set('flair', 'use', 'false')
-        self.set('flair', 'start', 'DEFAULT_FLAIR_VALUE_HERE')
-        self.set('flair', 'limit', 'GREATEST_FLAIR_VALUE_HERE')
-        self.set('flair', 'pattern', 'FLAIR_PATTERN_HERE_SUPPORTS_%%i_FOR_INT')
-        self.set('flair', 'increment', 'STEP_SIZE_USED_BY_FLAIR_AS_INTEGER')
-
-        self.add_section('crawl')
-        self.set('crawl', 'file', 'DATABASE_FILE_NAME')
-        self.set('crawl', 'sleep', 'TIME_TO_WAIT_BETWEEN_CRAWLS_IN_SECONDS')
-
-        self.add_section('monitor')
-        self.set('monitor', 'log', 'PATH_FOR_LOG_FILE_HERE')
-        self.set('monitor', 'new', 'MONITOR_NEW_USER_POSTS-true_false')
-        self.set('monitor', 'crawl', 'RECORD_USER_HEATWARE_HISTORY-true_false')
-        self.set('monitor', 'record', 'RECORD_USER_TRADE_HISTORY-true_false')
-        self.set('monitor', 'format', ('%(created)d -- %(levelname)s '
-                                       '\t-> %(message)s'))
-        self.set('monitor', 'summary', 'PROVIDE_USER_HISTORY-true_false')
-        self.set('monitor', 'respond', 'PROVIDE_HISTORY_THROUGH_PM-true_false')
-
-        self.add_section('trade')
-        self.set('trade', 'id', '')
-        self.set('trade', 'respond', 'IF_THE_BOT_RESPONDS_AFTER_TRADE_CONFIRM')
-        self.set('trade', 'response', 'HOW_THE_BOT_RESPONDS')
-        self.set('trade', 'age_msg', 'MESSAGE_USED_IF_AN_ACCOUNT_IS_TOO_YOUNG')
-        self.set('trade', 'age_type', 'LIMIT_UNIT-seconds/minutes/hours/days')
-        self.set('trade', 'age_limit', 'NUMERICAL_LIMIT_FOR_USER_AGE')
-        self.set('trade', 'same_msg',
-                 'MESSAGE_USED_IF_AN_ACCOUNT_TRADES_WITH_ITSELF')
-        self.set('trade', 'karma_msg',
-                 'MESSAGE_USED_IF_AN_ACCOUNT_HAS_TOO_LITTLE_KARMA')
-        self.set('trade', 'karma_type',
-                 'WHAT_KARMA_TO_CONSIDER-comment/link/both')
-        self.set('trade', 'karma_limit', 'NUMERICAL_LIMIT_FOR_USER_KARMA')
-
-        self.add_section('heatware')
-        self.set('heatware', 'post_id', '')
-        self.set('heatware', 'post_text', 'YOUR_POST_TEXT_HERE')
-        self.set('heatware', 'post_rate', 'YOUR_POST_RATE_HERE-yearly/maximum')
-        self.set('heatware', 'post_title', 'YOUR_POST_TITLE_HERE')
-        self.set('heatware', 'post_sticky', 'false')
-        self.set('heatware', 'regex',
-                 '(?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)')
-        self.set('heatware', 'group', '1')
-        self.set('heatware', 'respond',
-                 'IF_THE_BOT_RESPONDS_AFTER_RECORDING_HEATWARE')
-        self.set('heatware', 'response', 'HOW_THE_BOT_RESPONDS')
-
-    ''' Core reddit configuration details '''
-
-    def set_user_agent(self, user_agent):
-        return self.protected_push('reddit', 'user_agent', user_agent)
-
-    def get_user_agent(self):
-        return self.protected_pull('reddit', 'user_agent')
-
-    def set_client_id(self, client_id):
-        return self.protected_push('reddit', 'client_id', client_id)
-
-    def get_client_id(self):
-        return self.protected_pull('reddit', 'client_id')
-
-    def set_client_secret(self, client_secret):
-        return self.protected_push('reddit', 'client_secret', client_secret)
-
-    def get_client_secret(self):
-        return self.protected_pull('reddit', 'client_secret')
-
-    def set_redirect_url(self, redirect_url):
-        return self.protected_push('reddit', 'redirect_url', redirect_url)
-
-    def get_redirect_url(self):
-        return self.protected_pull('reddit', 'redirect_url')
-
-    def set_subreddit(self, subreddit):
-        return self.protected_push('reddit', 'subreddit', subreddit)
-
-    def get_subreddit(self):
-        return self.protected_pull('reddit', 'subreddit')
-
-    def is_multiprocess(self):
-        return self.protected_pullboolean('reddit', 'multiprocess')
-
-    def is_verbose(self):
-        return self.protected_pullboolean('reddit', 'verbose')
-
-    ''' Configuration details for the sidebar '''
-
-    def add_button(self):
-        return self.protected_pullboolean('sidebar', 'add_button')
-
-    def set_button_text(self, button_text):
-        return self.protected_push('sidebar', 'button_text', button_text)
-
-    def get_button_text(self):
-        return self.protected_pull('sidebar', 'button_text')
-
-    def get_button_limits(self):
-        return (self.protected_pull('sidebar', 'button_start'),
-                self.protected_pull('sidebar', 'button_end'))
-
-    ''' Configuration details for posts made by the bot '''
-
-    def make_sticky_post(self):
-        return self.protected_pullboolean('post', 'sticky')
-
-    def get_post_title(self):
-        return datetime.datetime.now().strftime(
-            self.protected_pull('post', 'title'))
-
-    def get_post_rate(self):
-        now = datetime.datetime.now()
-        rate = self.protected_pull('post', 'rate')
-        if 'da' in rate:
-            return datetime.datetime(now.year, now.month, now.day + 1)
-        elif 'month' in rate:
-            return datetime.datetime(now.year, now.month + 1, 1)
-        elif 'year' in rate:
-            return datetime.datetime(now.year + 1, now.month, 1)
-
-    def get_post_text(self):
-        return self.protected_pull('post', 'text')
-
-    def get_post_id(self):
-        return self.protected_pull('post', 'id')
-
-    def get_message_content(self):
-        return (self.protected_pull('post', 'msg_title'),
-                self.protected_pull('post', 'msg_text'))
-
-    ''' Configuration details for updating a user's flair '''
-
-    def use_flair(self):
-        return self.protected_pullboolean('flair', 'use')
-
-    def get_flair_start(self):
-        return self.protected_pull('flair', 'start')
-
-    def get_flair_limit(self):
-        return self.protected_pull('flair', 'limit')
-
-    def get_flair_pattern(self):
-        return self.protected_pull('flair', 'pattern')
-
-    def get_flair_increment(self):
-        return self.protected_pull('flair', 'increment', int)
-
-    ''' Configuration details for crawling reddit '''
-
-    def get_data_file(self):
-        return self.protected_pull('crawl', 'file')
-
-    def get_sleep_interval(self):
-        return self.protected_pull('crawl', 'sleep', float)
-
-    ''' Configuration details for handling user history '''
-
-    def get_log_file_path(self):
-        return self.protected_pull('monitor', 'log')
-
-    def monitor_new_posts(self):
-        return self.protected_pullboolean('monitor', 'new')
-
-    def monitor_external(self):
-        return self.protected_pullboolean('monitor', 'crawl')
-
-    def get_log_format(self):
-        return self.protected_pull('monitor', 'format')
-
-    def record_history(self):
-        return self.protected_pullboolean('monitor', 'record')
-
-    def post_summary(self):
-        return self.protected_pullboolean('monitor', 'summary')
-
-    def reply_summary(self):
-        return self.protected_pullboolean('monitor', 'respond')
-
-    ''' Configuration details for analyzing trade threads '''
-
-    def get_trade_thread_id(self):
-        return self.protected_pull('trade', 'id')
-
-    def respond_to_trade(self):
-        return self.protected_pullboolean('trade', 'respond')
-
-    def get_trade_response(self):
-        return self.protected_pull('trade', 'response')
-
-    def get_age_limitation(self):
-        age_type = self.protected_pull('trade', 'age_type').lower()
-        if 'day' in age_type:
-            age_type = 24 * 60 * 60
-        elif 'hour' in age_type:
-            age_type = 60 * 60
-        elif 'minute' in age_type:
-            age_type = 60
-        elif 'second' in age_type:
-            age_type = 1
-        else:
-            raise ValueError
-        return age_type * self.protected_pull('trade', 'age_limit', float)
-
-    def get_age_message(self):
-        return self.protected_pull('trade', 'age_msg')
-
-    def get_karma_limitation(self):
-        return self.protected_pull('trade', 'karma_limit', int)
-
-    def get_karma_limitation_type(self):
-        return self.protected_pull('trade', 'karma_type')
-
-    def get_karma_message(self):
-        return self.protected_pull('trade', 'karma_msg')
-
-    def get_same_account_message(self):
-        return self.protected_pull('trade', 'same_msg')
-
-    ''' Configuration details for analyzing heatware threads '''
-
-    def get_heatware_thread_id(self):
-        return self.protected_pull('heatware', 'post_id')
-
-    def get_heatware_thread_text(self):
-        return self.protected_pull('heatware', 'post_text')
-
-    def get_heatware_thread_rate(self):
-        rate = self.protected_pull('heatware', 'post_rate')
-        if 'maximum' in rate:
-            return float('inf')
-        else:
-            return 365 * 24 * 60 * 60
-
-    def get_heatware_thread_title(self):
-        return self.protected_pull('heatware', 'post_title')
-
-    def get_heatware_thread_sticky(self):
-        return self.protected_pullboolean('heatware', 'post_sticky')
-
-    def filter_heatware_url(self, text):
-        if not self.heatware_regex:
-            pattern = regex.compile(self.protected_pull('heatware', 'regex'),
-                                    regex.UNICODE)
-            group = self.protected_pull('heatware', 'group', int, None)
-            if group:
-                self.heatware_regex = lambda x: pattern.search(x).group(group)
-            else:
-                self.heatware_regex = lambda x: pattern.findall(x)[0]
-        return self.heatware_regex(text)
-
-    def respond_to_heatware_request(self):
-        return self.protected_pullboolean('heatware', 'respond')
-
-    def get_heatware_response(self):
-        return self.protected_pull('heatware', 'response')
-
-
 class database_handler(shelve.DbfilenameShelf):
 
     def __init__(self, data_file):
         super(self.__class__, self).__init__(filename=data_file)
 
+    def get(self, key):
+        try:
+            return self[key.lower()]
+        except:
+            return {}
+
+    def set(self, key, val):
+        try:
+            cur = self.get(key)
+            _ = self.update(val, cur)
+            self[key.lower()] = val
+            return True
+        except:
+            return False
+
+    def remove(self, key):
+        try:
+            del self[key]
+            return True
+        except:
+            return False
+
+    def update(self, new_, orig):
+        for key, val in orig.items():
+            if isinstance(val, collections.Mapping):
+                new_[key] = self.update(new_.get(key, {}), val)
+            else:
+                new_[key] = orig[key]
+        return new_
+
+    def terminate(self):
+        self.sync()
+        self.close()
+
 
 class heatware_crawler():
 
-    def __init__(self, deep_parse=False, page_wait=1 * 60, rand_wait=False):
-        self.deep_parse = deep_parse
+    def __init__(self, page_wait=0, deep_parse=False, rand_wait=False):
+        # TODO: See if heat is okay with maximum one request per sixty seconds.
         self.page_wait = max(60, page_wait)
-        self.rand_wait = rand_wait
+        self.sqrt_wait = math.sqrt(self.page_wait)
+        # TODO: See if heat is okay with deep crawling of his site.
+        self.deep_parse = False  # deep_parse
+        if rand_wait:
+            self.rand_wait = lambda: random.uniform(self.sqrt_wait / 2.0,
+                                                    self.sqrt_wait * 2.0)
+        else:
+            self.rand_wait = lambda: 0
         self.next_time = time.time()
-        self.get_next_time = lambda: (time.time() + self.page_wait +
-                                      (random.uniform(5, 10) if self.rand_wait
-                                       else 0))
+        self.get_next_time = lambda: (
+            time.time() + self.page_wait + self.rand_wait())
         self.get_page = urllib.request.urlopen
-        self.root_page = 'www.heatware.com/eval.php?id='
+        self.root_page = 'http://www.heatware.com/eval.php?id='
         self.page_ext = '&pagenum=%i'
         self.eval_ext = '&num_days=%i'
-        self.info_dict = {'deep_parse': self.deep_parse,
-                          'rating': {'positive': 0,
-                                     'neutral': 0,
-                                     'negative': 0},
-                          'aliases': {},
-                          'location': None,
-                          'evaluations': []}
-        self.subhead_map = {'Evaluation Summary': {'function': self._summary,
-                                                   'key': 'rating'},
-                            'User Information': {'function': self._information,
-                                                 'key': 'location'},
-                            'Aliases': {'function': self._aliases,
-                                        'key': 'aliases'},
-                            'Evaluations': {'function': self._evaluations,
-                                            'key': 'evaluations'}}
+        self.info_dict = {
+            # 'deep_parse': self.deep_parse,
+            'rating': {'positive': 0,
+                       'neutral': 0,
+                       'negative': 0},
+            'aliases': {},
+            'location': None,
+            'evaluations': []
+        }
+        self.subhead_map = {
+            'Evaluation Summary': {'function': self._summary,
+                                   'key': 'rating'},
+            'User Information': {'function': self._information,
+                                 'key': 'location'},
+            'Aliases': {'function': self._aliases,
+                        'key': 'aliases'},
+            'Evaluations': {'function': self._evaluations,
+                            'key': 'evaluations'}
+        }
         self.text_clean = regex.compile(r'\s+', regex.UNICODE)
         self.date_clean = regex.compile(r'\d{2}-\d{2}-\d{4}', regex.UNICODE)
 
@@ -682,7 +408,6 @@ class heatware_crawler():
                 except:
                     info[self.subhead_map[subhead.text]['key']] = (copy.deepcopy(
                         self.info_dict[self.subhead_map[subhead.text]['key']]))
-
         return info
 
     def parse_id(self, id_):
@@ -717,18 +442,20 @@ class heatware_crawler():
                 alias, site = alias.text.split(' on ', 1)
                 alias = alias.lower()
                 if link:
-                    links[(alias, link.text.lower())] = link.get('href')
+                    links.setdefault(link.text.lower(), {}
+                                     ).setdefault(alias, link.get('href'))
                 else:
-                    links[(alias, site.lower())] = None
+                    links.setdefault(site.lower(), {}).setdefault(alias, None)
             except:
                 pass
         return links
 
     def _evaluations(self, spoonful, soup):
         root = spoonful.parent
-        evals = []
+        evals = {}
         for evalu in root.find_all(id=regex.compile(r'rp_[0-9]+')):
-            info = {'id': int(evalu.get('id').strip('rp_'))}
+            id_ = int(evalu.get('id').strip('rp_'))
+            info = {}
 
             try:
                 info['user'] = self._clean(evalu.find('td').text)
@@ -761,7 +488,7 @@ class heatware_crawler():
             except:
                 info['comments'] = None
 
-            evals.append(info)
+            evals[id_] = info
         return evals
 
     def _clean(self, text):
@@ -789,10 +516,10 @@ if __name__ == '__main__':
                                      epilog=('Currently maintained by ' +
                                              ', '.join(coerce_reddit_handles()) +
                                              '.'))
-    parser.add_argument('-ns', '--no-shell', action='store_true',
-                        help='run the bot without its shell')
+    parser.add_argument('-is', '--interactive-shell', action='store_true',
+                        help='run the bot with an interactive shell')
     args = parser.parse_args()
-    if args.no_shell:
-        bot()
-    else:
+    if args.interactive_shell:
         bot_prompt().cmdloop()
+    else:
+        bot()

@@ -1,11 +1,13 @@
-from ConfigParser import SafeConfigParser
 from datetime import datetime
 from time import sleep
 import logging
 import os
-import praw
 import string
 import sys
+
+import praw
+
+from ConfigParser import SafeConfigParser
 
 
 # load config file
