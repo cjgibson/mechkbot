@@ -468,21 +468,76 @@ class bot(praw.Reddit):
                                       'sufficient karma to confirm a trade.')})
         ]),
         'heatware': collections.OrderedDict([
-            ('method', {'def': 'pm'}),
-            ('post_id', {}),
-            ('post_text', {}),
-            ('post_rate', {'def': 'yearly'}),
-            ('post_title', {}),
-            ('post_sticky', {}),
-            ('message_text', {}),
-            ('message_title', {}),
+            ('method', {'def': 'pm',
+                        'desc': ('The method by which the bot will collect a '
+                                 'user\'s heatware URL. Three options are '
+                                 'available, "pm", "post", and "both". If "pm" '
+                                 'is specified, users can submit heatware URLs '
+                                 'by means of private message to the bot. If '
+                                 '"post" is specified, users can submit their '
+                                 'heatware URLs by means of commenting in a '
+                                 'specified post. If "both" is specified, '
+                                 'either method can be used.')}),
+            ('post_id', {'def': None,
+                         'desc': ('The id used by the heatware thread in the '
+                                  'target subreddit.')}),
+            ('post_text', {'desc': ('The text template used when creating a '
+                                    'new heatware thread. Supports formatting '
+                                    'arguments as found in Python\'s strftime '
+                                    'command. For more information, see: '
+                                    'https://docs.python.org/2/library/time.html'
+                                    '#time.strftime.')}),
+            ('post_rate', {'def': 'yearly',
+                           'desc': ('The rate at which the bot will create '
+                                    'new heatware posts on the target subreddit.'
+                                    ' Provided options include "daily", '
+                                    '"weekly", "monthly", "yearly", and "never"'
+                                    '. If "never" is selected, the post_id will'
+                                    ' have to be updated manually by the user.')}),
+            ('post_title', {'desc': ('The text template used when creating a '
+                                     'new heatware thread\'s title. Supports '
+                                     'formatting arguments as found in Python\'s'
+                                     'strftime command. For more information, '
+                                     'see: https://docs.python.org/2/library/'
+                                     'time.html#time.strftime.')}),
+            ('post_sticky', {'desc': ('If the bot makes the heatware thread '
+                                      'sticky or not.')}),
+            ('post_response', {'desc': ('The text template used when replying '
+                                        'to an accepted heatware comment on a '
+                                        'heatware post. Supports formatting '
+                                        'arguments as found in Python\'s '
+                                        'strftime command. For more information'
+                                        ', see: https://docs.python.org/2/'
+                                        'library/time.html#time.strftime.')}),
+            ('message_text', {'desc': ('The text template used when sending a '
+                                       'private message to a user following'
+                                       ' an accepted heatware profile. Supports '
+                                       'formatting arguments as found in Python\'s'
+                                       ' strftime command. For more information,'
+                                       ' see: https://docs.python.org/2/library'
+                                       '/time.html#time.strftime.')}),
+            ('message_title', {'desc': ('The text template used when sending a '
+                                        'private message to a users following '
+                                        'an accepted heatware profile. Supports '
+                                        'formatting arguments as found in '
+                                        'Python\'s strftime command. For more '
+                                        'information, see: https://docs.python.'
+                                        'org/2/library/time.html#time.strftime.')}),
             ('regex', {'def': '(?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)',
-                       'set': None}),
+                       'set': None,
+                       'desc': ('The regular expression used to extract '
+                                'heatware URLs from plaintext comments.')}),
             ('group', {'def': '1',
-                       'set': None}),
+                       'set': None,
+                       'desc': ('The group within the regular expression that '
+                                'actually contained the captured heatware URL. '
+                                'If left blank, the parser will accept the '
+                                'entire match resulting from the regular '
+                                'expression.')}),
             ('respond', {'def': 'true',
-                         'boolean': True}),
-            ('response', {})
+                         'desc': ('If a bot should respond to an accepted '
+                                  'heatware profile URL or not.'),
+                         'boolean': True})
         ])
     }
 
