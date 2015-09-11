@@ -46,12 +46,12 @@ __INFO__ = 'MechKBot-v%s on "%s" with << %s v%s >> at %s %s' % (
 
 
 def coerce_reddit_handles():
-    clean = regex.compile(r'[^A-Z0-9_/-]',
-                          regex.UNICODE + regex.IGNORECASE)
+    clean = regex.compile(r'[^A-Z0-9_/-]', regex.UNICODE + regex.IGNORECASE)
     authors = []
     for author in __AUTHORS__:
         author = clean.sub('', str(author))
-        if author.startswith('/u/') or author.startswith('/r/'):
+        if ((author.startswith('/u/') or author.startswith('/r/'))
+                and len(author.split('/')) == 3):
             authors.append(author)
         else:
             authors.append('/u/' + max(author.split('/'), key=len))
@@ -59,6 +59,7 @@ def coerce_reddit_handles():
 
 
 class config_generator():
+    # c = bot.config_generator()(bot.bot.CONFIG_DEFAULTS)() ; print(c.func_code)
     _FUNC_CODE_ = """class config_handler(configparser.RawConfigParser):
 
     def __init__(self, conf_file=None):
@@ -145,9 +146,39 @@ class config_generator():
     def __init__(self):
         pass
 
-    def __call__(self, sections):
-        added_methods = {'generate_defaults': None}
+    def __call__(self, sections, ignore_description=False):
+        if all(all('desc' in detail for _, detail in options.items())
+               for _, options in sections.items()) or ignore_description:
+            pass
+        else:
+            raise TypeError('Provided configuration does not provide a "desc" '
+                            'field for each section option. As such, the %s '
+                            'cannot create an interactive_initialization() '
+                            'method. To create the constructor without the '
+                            'interactive_initialization() method, set '
+                            '"ignore_description" to True when calling %s.'
+                            % (self.__class__, self.__class__))
+
+        added_methods = {attr_or_func: None
+                         for attr_or_func in dir(configparser.RawConfigParser)}
+        added_methods['conf_file'] = None
+        added_methods['func_code'] = None
+        added_methods['heatware_regex'] = None
+        added_methods['protected_pull'] = None
+        added_methods['protected_pullboolean'] = None
+        added_methods['protected_push'] = None
+        added_methods['protected_pushboolean'] = None
+        added_methods['status'] = None
+        added_methods['store'] = None
+        added_methods['true_values'] = None
+        if ignore_description:
+            added_methods['generate_defaults'] = None
+        else:
+            added_methods['generate_defaults'] = None
+            added_methods['interactive_initialization'] = None
+            init_initials = ["    def interactive_initialization(self):"]
         init_defaults = ["    def generate_defaults(self):"]
+
         for section, options in sections.items():
             init_defaults.append("        self.add_section('%s')" % section)
             for option, detail in options.items():
@@ -166,7 +197,9 @@ class config_generator():
                 else:
                     get_method = 'get_%s_%s' % (section, option)
                 if get_method in added_methods:
-                    raise TypeError
+                    raise SyntaxError('Attempted to add get method %s to new '
+                                      'config_handler object, but it was '
+                                      'already defined.' % get_method)
                 if get_method:
                     added_methods[get_method] = (
                         "    def %s(self):\n"
@@ -181,30 +214,46 @@ class config_generator():
                 else:
                     set_method = 'set_%s_%s' % (section, option)
                 if set_method in added_methods:
-                    raise TypeError
+                    raise SyntaxError('Attempted to add set method %s to new '
+                                      'config_handler object, but it was '
+                                      'already defined.' % set_method)
                 if set_method:
                     added_methods[set_method] = (
                         "    def %s(self, value):\n"
                         "        return self.%s('%s', '%s', value)\n"
                         % (set_method, pushtype, section, option))
 
-                try:
+                if 'def' in detail:
+                    init_defaults.append("        self.set('%s', '%s', '%s')"
+                                         % (section, option, detail['def']))
+                else:
+                    init_defaults.append("        self.set('%s', '%s', '%s')"
+                                         % (section, option, ""))
+
+                if not ignore_description:
+                    init_initials.append("        print('`" +
+                                         self.sanify(option) + "`: \"" +
+                                         self.sanify(detail['desc']) + "\"')")
                     if 'def' in detail:
-                        init_defaults.append("        self.set('%s', '%s', '%s')"
-                                             % (section, option, detail['def']))
-                    else:
-                        init_defaults.append("        self.set('%s', '%s', '%s')"
-                                             % (section, option, ""))
-                except:
-                    raise TypeError
+                        init_initials.append("        print('Leave blank to use"
+                                             " the provided default value: \"" +
+                                             self.sanify(detail['def']) + "\"')")
 
         added_methods['generate_defaults'] = ('\n'.join(init_defaults) + '\n' +
                                               '        self.store()\n')
-        _func_code_ = self._FUNC_CODE_ + '\n'.join(added_methods.values())
+        if not ignore_description:
+            added_methods['interactive_initialization'] = (
+                '\n'.join(init_initials) + '\n')
+        _func_code_ = (self._FUNC_CODE_ +
+                       '\n'.join(filter(lambda x: isinstance(x, str),
+                                        added_methods.values())))
         exec(compile(_func_code_, '<string>', 'exec'))
         config = eval('config_handler')
         config.func_code = _func_code_
         return config
+
+    def sanify(self, text):
+        return text.encode('unicode-escape').decode().replace("'", "\\'")
 
 _BS4_PARSER = 'html.parser'
 _GET_CONFIG = config_generator()
@@ -387,8 +436,7 @@ class bot(praw.Reddit):
                                  'containing the phrase "confirmed". In the '
                                  'case that "both" is specified, either option '
                                  'can be used to confirm a trade.')}),
-            ('post_id', {'def': None,
-                         'desc': ('The id used by the trading thread within '
+            ('post_id', {'desc': ('The id used by the trading thread within '
                                   'the target subreddit. If left blank, the '
                                   'bot will create its own trading thread. In '
                                   'the case that "pm" is used as a method, '
@@ -478,8 +526,7 @@ class bot(praw.Reddit):
                                  'heatware URLs by means of commenting in a '
                                  'specified post. If "both" is specified, '
                                  'either method can be used.')}),
-            ('post_id', {'def': None,
-                         'desc': ('The id used by the heatware thread in the '
+            ('post_id', {'desc': ('The id used by the heatware thread in the '
                                   'target subreddit.')}),
             ('post_text', {'desc': ('The text template used when creating a '
                                     'new heatware thread. Supports formatting '
@@ -611,6 +658,11 @@ class heatware_crawler():
 
     def __init__(self, page_wait=0, deep_parse=False, rand_wait=False):
         # TODO: See if heat is okay with maximum one request per sixty seconds.
+        # STATUS: Reached out to heat as of Aug 29; no response as of yet.
+        #         The site's robots.txt (http://heatware.com/robots.txt) seems
+        #           to allow any sort of automated crawling, but I won't
+        #           implement the ability to perform a 'deep_parse' until I
+        #           get confirmation from the man himself.
         self.page_wait = max(60, page_wait)
         self.sqrt_wait = math.sqrt(self.page_wait)
         # TODO: See if heat is okay with deep crawling of his site.
