@@ -2,29 +2,26 @@
 ###
 # AUTHORS: CHRISTIAN GIBSON,
 # PROJECT: /r/MechMarket Bot
-# UPDATED: SEPTEMBER 5, 2015
+# UPDATED: SEPTEMBER 11, 2015
 # USAGE:   python bot.py [-h / --help] [-is / --interactive-shell]
 # EXPECTS: python 3.4.0
 #          beautifulsoup4 4.4.0
+#          praw 3.2.1
 #          regex 2015.06.24
 ###
 
 import argparse
-import bs4
 import cmd
 import collections
 import configparser
 import copy
-import datetime
 import errno
 import inspect
 import logging
 import math
 import os
 import platform
-import praw
 import random
-import regex
 import shelve
 import shutil
 import threading
@@ -33,9 +30,14 @@ import traceback
 import urllib
 import uuid
 
+import bs4
+import praw
+import regex
+
 
 __AUTHORS__ = ['/u/NotMelNoGuitars']
 __VERSION__ = 0.1
+__CMD_STR__ = '>>> '
 __INFO__ = 'MechKBot-v%s on "%s" with << %s v%s >> at %s %s' % (
     __VERSION__,
     platform.platform(),
@@ -176,7 +178,8 @@ class config_generator():
         else:
             added_methods['generate_defaults'] = None
             added_methods['interactive_initialization'] = None
-            init_initials = ["    def interactive_initialization(self):"]
+            init_initials = ["    def interactive_initialization(self):",
+                             "        to_initialize = ["]
         init_defaults = ["    def generate_defaults(self):"]
 
         for section, options in sections.items():
@@ -224,24 +227,73 @@ class config_generator():
                         % (set_method, pushtype, section, option))
 
                 if 'def' in detail:
-                    init_defaults.append("        self.set('%s', '%s', '%s')"
-                                         % (section, option, detail['def']))
+                    init_defaults.append(
+                        "        self.set('%s', '%s', '%s')" %
+                        (section, option, detail['def']))
                 else:
-                    init_defaults.append("        self.set('%s', '%s', '%s')"
-                                         % (section, option, ""))
+                    init_defaults.append(
+                        "        self.set('%s', '%s', '%s')" %
+                        (section, option, ""))
 
                 if not ignore_description:
-                    init_initials.append("        print('`" +
-                                         self.sanify(option) + "`: \"" +
-                                         self.sanify(detail['desc']) + "\"')")
                     if 'def' in detail:
-                        init_initials.append("        print('Leave blank to use"
-                                             " the provided default value: \"" +
-                                             self.sanify(detail['def']) + "\"')")
+                        init_initials.append(
+                            "            ('%s', '%s', '%s', '%s', '%s')," %
+                            (self.sanify(detail['desc']),
+                             self.sanify(detail['def']),
+                             pushtype, section, option))
+                    else:
+                        init_initials.append(
+                            "            ('%s', None, '%s', '%s', '%s')," %
+                            (self.sanify(detail['desc']),
+                             pushtype, section, option))
 
         added_methods['generate_defaults'] = ('\n'.join(init_defaults) + '\n' +
                                               '        self.store()\n')
         if not ignore_description:
+            init_initials.extend([
+                "        ]",
+                "",
+                "        for desc, def_, fxn, sec, opt in to_initialize:",
+                "            value_set = False",
+                "            while not value_set:",
+                "                try:",
+                "                    print('Now setting [%s].[%s]:' % (sec, opt))",
+                "                    print('Description: %s' % desc)",
+                "                    if def_:",
+                "                        print('Leave blank to use default '",
+                "                              'value \"%s\".' % def_)",
+                "                    val = input('Set [%s].[%s]: ' % (sec, opt))",
+                "                    if val:",
+                "                        getattr(self, fxn)(sec, opt, val)",
+                "                        value_set = True",
+                "                    elif def_:",
+                "                        getattr(self, fxn)(sec, opt, def_)",
+                "                        value_set = True",
+                "                    else:",
+                "                        print('(!!!) Invalid value provided, '",
+                "                              'or no value provided with no '",
+                "                              'default available.\\n')",
+                "                    if value_set:",
+                "                        rec = self.get(sec, opt)",
+                "                        print('Value set as \"%s\".' % rec,",
+                "                              end=' ')",
+                "                        chk = input('Is that correct? (y/n) ')",
+                "                        if chk.lower().strip().startswith('y'):",
+                "                            print('Input accepted and stored.'",
+                "                                  '\\f\\n\\r')",
+                "                        else:",
+                "                            print('Interpreted response as '",
+                "                                  '\"no\". Will recapture '",
+                "                                  'input.\\n')",
+                "                            value_set = False",
+                "                except KeyboardInterrupt:",
+                "                    raise",
+                "                except:",
+                "                    print('(!!!) Error encountered when '",
+                "                          'attempting to set value.\\n')",
+                "        self.store()"
+                ])
             added_methods['interactive_initialization'] = (
                 '\n'.join(init_initials) + '\n')
         _func_code_ = (self._FUNC_CODE_ +
@@ -266,7 +318,7 @@ class bot_prompt(cmd.Cmd):
 
     def __init__(self):
         super(self.__class__, self).__init__()
-        self.prompt = '>>> '
+        self.prompt = __CMD_STR__
         self.size = shutil.get_terminal_size()
         self.height, self.width = self.size.lines, self.size.columns
 
@@ -299,20 +351,27 @@ class bot(praw.Reddit):
                                      __VERSION__,
                                      ', '.join(coerce_reddit_handles()))),
                             'desc': ('This is the plaintext string that will '
-                                     'be used by the admin\'s at reddit to '
+                                     'be used by the admins at reddit to '
                                      'identify this bot. It is recommended '
                                      'that bots follow the format:\n'
                                      '  <platform>:<app ID>:<version string> '
                                      '(by /u/<reddit username>)\n'
                                      'Full rules and restrictions can be '
-                                     'found here: https://github.com/reddit/'
+                                     'found here: http://github.com/reddit/'
                                      'reddit/wiki/API.')}),
             ('client_id', {'desc': ('This is the OAuth2 client_id created '
-                                    'for your reddit app instance.')}),
+                                    'for your reddit app instance. More '
+                                    'information can be found here: http://'
+                                    'github.com/reddit/reddit/wiki/OAuth2.')}),
             ('client_secret', {'desc': ('This is the OAuth2 client_secret '
-                                        'created for your reddit app instance.')}),
+                                        'created for your reddit app instance. '
+                                        'More information can be found here: '
+                                        'http://github.com/reddit/reddit/wiki'
+                                        '/OAuth2.')}),
             ('redirect_url', {'desc': ('This is the OAuth2 redirect_url created '
-                                       'for your reddit app instance.')}),
+                                       'for your reddit app instance. More '
+                                       'information can be found here: http://'
+                                       'github.com/reddit/reddit/wiki/OAuth2.')}),
             ('subreddit', {'desc': 'The subreddit targeted by this bot.'}),
             ('multiprocess', {'def': 'false',
                               'get': 'is_multiprocessed',
@@ -356,27 +415,27 @@ class bot(praw.Reddit):
                                  ' %(module)s: Module that created a logged '
                                  'event.\n'
                                  ' %(msecs)d: Millisecond portion of system '
-                                 'time when event was logged.\n'
-                                 ' %(message)s: Message provided when event was'
-                                 ' logged.\n'
+                                 'time when an event was logged.\n'
+                                 ' %(message)s: Message provided when an event '
+                                 'was logged.\n'
                                  ' %(name)s: Name of the logger used to create '
                                  'the logged event.\n'
                                  ' %(pathname)s: Full pathname of the source '
                                  'file that created the logged event.\n'
                                  ' %(process)d: Process ID that created the '
                                  'logged event.\n'
-                                 ' %(processName)s: Process Name that created '
+                                 ' %(processName)s: Process name that created '
                                  'the logged event.\n'
                                  ' %(relativeCreated)d: Milliseconds after the '
                                  'logging module was initially loaded that an '
                                  'event was logged.\n'
                                  ' %(thread)d: Thread ID that created the '
                                  'logged event.\n'
-                                 ' %(threadName)s: Thread Name that created '
+                                 ' %(threadName)s: Thread name that created '
                                  'the logged event.\n'
-                                 'Further information can be found at-- '
-                                 'https://docs.python.org/3.4/library/logging.'
-                                 'html#logging.LogRecord\n')}),
+                                 'Further information can be found at: '
+                                 'http://docs.python.org/3.4/library/logging.'
+                                 'html#logging.LogRecord')}),
         ]),
         'sidebar': collections.OrderedDict([
             ('add_button', {'def': 'false',
@@ -400,10 +459,10 @@ class bot(praw.Reddit):
             ('start', {'desc': 'Flair given to users never seen before.'}),
             ('limit', {'desc': ('Maximum integer indicating how many times '
                                 'a user\'s flair can be incremented.')}),
-            ('ignore', {'desc': ('A pipe-separated ("|") list of flairs which '
+            ('ignore', {'desc': ('A whitespace-separated list of flairs which '
                                  'should be ignored if encountered by the bot.')}),
             ('pattern', {'desc': ('The pattern used to generate new user '
-                                  'flair, following an increment. %i is used '
+                                  'flair following an increment. %i is used '
                                   'to indicate where the integer value of the '
                                   'flair should go. As a example, a flair '
                                   'pattern of "u-%i" would take on the values '
@@ -454,7 +513,7 @@ class bot(praw.Reddit):
                                     '"weekly", "monthly", "yearly", and "never"'
                                     '. If "never" is selected, the post_id will'
                                     ' have to be updated manually by the user.')}),
-            ('post_title', {'desc': ('The text template used when creating a '
+            ('post_title', {'desc': ('The title template used when creating a '
                                      'new trade thread\'s title. Supports '
                                      'formatting arguments as found in Python\'s'
                                      'strftime command. For more information, '
@@ -477,7 +536,7 @@ class bot(praw.Reddit):
                                        'strftime command. For more information,'
                                        ' see: https://docs.python.org/2/library'
                                        '/time.html#time.strftime.')}),
-            ('message_title', {'desc': ('The text template used when sending a '
+            ('message_title', {'desc': ('The title template used when sending a '
                                         'private message to both users '
                                         'following a confirmed trade. Supports '
                                         'formatting arguments as found in '
@@ -541,7 +600,7 @@ class bot(praw.Reddit):
                                     '"weekly", "monthly", "yearly", and "never"'
                                     '. If "never" is selected, the post_id will'
                                     ' have to be updated manually by the user.')}),
-            ('post_title', {'desc': ('The text template used when creating a '
+            ('post_title', {'desc': ('The title template used when creating a '
                                      'new heatware thread\'s title. Supports '
                                      'formatting arguments as found in Python\'s'
                                      'strftime command. For more information, '
@@ -563,8 +622,8 @@ class bot(praw.Reddit):
                                        ' strftime command. For more information,'
                                        ' see: https://docs.python.org/2/library'
                                        '/time.html#time.strftime.')}),
-            ('message_title', {'desc': ('The text template used when sending a '
-                                        'private message to a users following '
+            ('message_title', {'desc': ('The title template used when sending a '
+                                        'private message to a user following '
                                         'an accepted heatware profile. Supports '
                                         'formatting arguments as found in '
                                         'Python\'s strftime command. For more '
@@ -592,8 +651,6 @@ class bot(praw.Reddit):
         config_constructor = _GET_CONFIG(self.CONFIG_DEFAULTS)
         self.config_handler = config_constructor(conf_file)
         if self.config_handler.status:
-            print("Configuration file is in invalid state.")
-            print("Run bot with --interactive-shell option to rectify.")
             raise EnvironmentError(self.status,
                                    ('Current status #%d <%s> "%s".' %
                                     (self.status,
