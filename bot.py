@@ -11,6 +11,7 @@
 ###
 
 import argparse
+import bs4
 import cmd
 import collections
 import configparser
@@ -19,9 +20,12 @@ import errno
 import inspect
 import logging
 import math
+import multiprocessing
 import os
 import platform
+import praw
 import random
+import regex
 import shelve
 import shutil
 import threading
@@ -30,15 +34,11 @@ import traceback
 import urllib
 import uuid
 
-import bs4
-import praw
-import regex
-
 
 __AUTHORS__ = ['/u/NotMelNoGuitars']
 __VERSION__ = 0.1
 __CMD_STR__ = '>>> '
-__INFO__ = 'MechKBot-v%s on "%s" with << %s v%s >> at %s %s' % (
+__INFO__ = 'MechKB0t-v%s on "%s" with << %s v%s >> at %s %s' % (
     __VERSION__,
     platform.platform(),
     platform.python_implementation(),
@@ -47,10 +47,10 @@ __INFO__ = 'MechKBot-v%s on "%s" with << %s v%s >> at %s %s' % (
     time.localtime().tm_zone)
 
 
-def coerce_reddit_handles():
+def coerce_reddit_handles(handles=__AUTHORS__):
     clean = regex.compile(r'[^A-Z0-9_/-]', regex.UNICODE + regex.IGNORECASE)
     authors = []
-    for author in __AUTHORS__:
+    for author in handles:
         author = clean.sub('', str(author))
         if ((author.startswith('/u/') or author.startswith('/r/'))
                 and len(author.split('/')) == 3):
@@ -293,7 +293,7 @@ class config_generator():
                 "                    print('(!!!) Error encountered when '",
                 "                          'attempting to set value.\\n')",
                 "        self.store()"
-                ])
+            ])
             added_methods['interactive_initialization'] = (
                 '\n'.join(init_initials) + '\n')
         _func_code_ = (self._FUNC_CODE_ +
@@ -323,10 +323,10 @@ class bot_prompt(cmd.Cmd):
         self.height, self.width = self.size.lines, self.size.columns
 
 
-class bot(praw.Reddit):
+class bot(praw.Reddit, threading.Thread):
 
-    CONFIG_DEFAULTS = {
-        'crawl': collections.OrderedDict([
+    CONFIG_DEFAULTS = collections.OrderedDict([
+        ('crawl', collections.OrderedDict([
             ('file', {'def': 'data.record',
                       'desc': ('This is the name of the flatfile that will be '
                                'used to store all collected data on a user-by-'
@@ -335,17 +335,17 @@ class bot(praw.Reddit):
                       'desc': ('This is the number of seconds the bot will '
                                'spend in each state as a minimum.\nAs an '
                                'example, the bot has three states by default:\n'
-                               ' 1. Crawling /new of the target subreddit.\n'
-                               ' 2. Responding to user PMs.\n'
-                               ' 3. Crawling the trade thread of the target '
+                               ' 1. Crawl /new of the target subreddit.\n'
+                               ' 2. Respond to user PMs.\n'
+                               ' 3. Crawl the trade thread of the target '
                                'subreddit.')}),
             ('sleep', {'def': '100',
                        'desc': ('This is the number of seconds the bot will '
                                 'spend doing nothing after completing each set '
                                 'of states.')})
-        ]),
-        'reddit': collections.OrderedDict([
-            ('user_agent', {'def': ('%s-%s:%s:MechKBot-v%s (by %s)' %
+        ])),
+        ('reddit', collections.OrderedDict([
+            ('user_agent', {'def': ('%s-%s:%s:MechKB0t-v%s (by %s)' %
                                     (platform.system(), platform.processor(),
                                      uuid.uuid5(uuid.NAMESPACE_OID, __INFO__),
                                      __VERSION__,
@@ -384,14 +384,19 @@ class bot(praw.Reddit):
                          'desc': ('Sets whether the bot will display its '
                                   'actions during runtime, or simply log them.'),
                          'boolean': True})
-        ]),
-        'monitor': collections.OrderedDict([
+        ])),
+        ('monitor', collections.OrderedDict([
             ('log', {'def': 'event.log',
                      'desc': ('This is the flatfile that will be used to log '
                               'all actions taken by the bot.')}),
             ('posts', {'def': 'true',
                        'desc': ('Whether or not the bot will log basic '
                                 'information concerning all posts observed '
+                                'during its runtime.'),
+                       'boolean': True}),
+            ('users', {'def': 'true',
+                       'desc': ('Whether or not the bot will record basic '
+                                'infromation concerning all users observed '
                                 'during its runtime.'),
                        'boolean': True}),
             ('format', {'def': '%(created)f -- %(levelname)s -> %(message)s',
@@ -435,9 +440,16 @@ class bot(praw.Reddit):
                                  'the logged event.\n'
                                  'Further information can be found at: '
                                  'http://docs.python.org/3.4/library/logging.'
-                                 'html#logging.LogRecord')}),
-        ]),
-        'sidebar': collections.OrderedDict([
+                                 'html#logging.LogRecord')},
+             ('respond', {'def': 'true',
+                          'desc': ('Whether or not the bot should make a post '
+                                   'on each new trade thread.'),
+                          'boolean': True}),
+             ('response', {'desc': ('The text template used when commenting on '
+                                    'a new trade thread. Formatting options '
+                                    'include:\n')})),
+        ])),
+        ('sidebar', collections.OrderedDict([
             ('add_button', {'def': 'false',
                             'get': 'should_add_button',
                             'desc': ('Whether the bot should add a button for '
@@ -451,8 +463,8 @@ class bot(praw.Reddit):
             ('button_end', {'desc': ('A specialized tag, included in the '
                                      'sidebar\'s text, which determines where '
                                      'the button ends.')})
-        ]),
-        'flair': collections.OrderedDict([
+        ])),
+        ('class', collections.OrderedDict([
             ('use', {'def': 'true',
                      'desc': 'If the bot should monitor and update user flair.',
                      'boolean': True}),
@@ -477,8 +489,8 @@ class bot(praw.Reddit):
                                     'of "1", a user with a flair value of 3 '
                                     'would advance to a flair value of 4 after '
                                     'completing a trade.')})
-        ]),
-        'trade': collections.OrderedDict([
+        ])),
+        ('trade', collections.OrderedDict([
             ('method', {'def': 'post',
                         'desc': ('The method used by the bot to confirm user '
                                  'trades. Three options are available, "pm", '
@@ -573,8 +585,8 @@ class bot(praw.Reddit):
                              'desc': ('Numerical measurement used in '
                                       'determining if a user\'s account has '
                                       'sufficient karma to confirm a trade.')})
-        ]),
-        'heatware': collections.OrderedDict([
+        ])),
+        ('heatware', collections.OrderedDict([
             ('method', {'def': 'pm',
                         'desc': ('The method by which the bot will collect a '
                                  'user\'s heatware URL. Three options are '
@@ -631,7 +643,7 @@ class bot(praw.Reddit):
                                         'org/2/library/time.html#time.strftime.')}),
             ('regex', {'def': '(?:.*)(http(?:s?)://www\.heatware\.com/eval\.php\?id=[0-9]+)(?:.*)',
                        'set': None,
-                       'desc': ('The regular expression used to extract '
+                       'desc': ('The regular expression used to _extract '
                                 'heatware URLs from plaintext comments.')}),
             ('group', {'def': '1',
                        'set': None,
@@ -644,18 +656,19 @@ class bot(praw.Reddit):
                          'desc': ('If a bot should respond to an accepted '
                                   'heatware profile URL or not.'),
                          'boolean': True})
-        ])
-    }
+        ]))
+    ])
 
-    def __init__(self, conf_file=None):
+    def __init__(self, conf_file='config.cfg'):
         config_constructor = _GET_CONFIG(self.CONFIG_DEFAULTS)
         self.config_handler = config_constructor(conf_file)
         if self.config_handler.status:
-            raise EnvironmentError(self.status,
+            raise EnvironmentError(self.config_handler.status,
                                    ('Current status #%d <%s> "%s".' %
-                                    (self.status,
-                                     errno.errorcode[self.status],
-                                     os.strerror(self.status))),
+                                    (self.config_handler.status,
+                                     errno.errorcode[
+                                         self.config_handler.status],
+                                     os.strerror(self.config_handler.status))),
                                    conf_file)
         log = logging.StreamHandler(self.config_handler.get_monitor_log())
         fmt = logging.Formatter(self.config_handler.get_monitor_format())
@@ -664,11 +677,280 @@ class bot(praw.Reddit):
         logger.addHandler(log)
         self.data_store = database_handler(
             self.config_handler.get_crawl_file())
-        super(self.__class__, self).__init__(
-            self.config_handler.get_reddit_user_agent())
+        self.heat_parse = heatware_crawler()
+        self.run_states = {
+            state[6:].lstrip('_'): getattr(self, state)
+            for state in set(dir(self)).difference(dir(super()))
+            if (state.startswith('_state')
+                and hasattr(getattr(self, state), '__call__'))}
+        super().__init__(self.config_handler.get_reddit_user_agent())
         self.set_oauth_app_info(self.config_handler.get_reddit_client_id(),
                                 self.config_handler.get_reddit_client_secret(),
                                 self.config_handler.get_reddit_redirect_url())
+        threading.Thread.__init__(self, daemon=True)
+
+    def run(self):
+        while True:
+            state_time = {state: max(1, self.config_handler.get_crawl_hold())
+                          for state in self.run_states}
+            while any(t > 0 for t in state_time.values()):
+                for state, function in self.run_states.items():
+                    if state_time[state] > 0:
+                        self.state = state
+                        state_start = time.time()
+                        try:
+                            function()
+                        except:
+                            pass
+                        state_elaps = time.time() - state_start
+                        if state_elaps > 0:
+                            state_time[state] -= state_elaps
+                        else:
+                            state_time[state] = 0
+            time.sleep(self.config_handler.get_crawl_sleep())
+        self.shutdown()
+
+    def _state_trade(self):
+        """
+        Performs processing necessary for the verification and updating
+          of user's css class following a successful trade.
+
+        Will need to call the following methods from self.config_handler:
+          get_trade_method()
+          if get_trade_method() in ['post', 'both']:
+            get_trade_post_id()
+            get_trade_post_text()
+            get_trade_post_rate()
+            get_trade_post_title()
+            get_trade_post_sticky()
+            get_trade_post_response()
+            should_add_button()
+            get_sidebar_button_text()
+            get_sidebar_button_start()
+            get_sidebar_button_end()
+          if get_trade_method() in ['pm', 'both']:
+            get_trade_message_text()
+            get_trade_message_title()
+          get_trade_respond()
+          get_trade_age_msg()
+          get_trade_age_type() -> ['seconds', 'minutes', 'hours', 'days', 'months']
+          get_trade_same_msg()
+          get_trade_karma_msg()
+          get_trade_karma_type() -> ['comment', 'link', 'both']
+          get_trade_karma_limit()
+
+          get_class_use()
+          get_class_start()
+          get_class_limit()
+          get_class_ignore()
+          get_class_pattern()
+          get_class_increment()
+
+        In addition, will need to log results to logger, and store updated
+          user information in self.data_store if get_monitor_users() is True.
+        """
+        if self.config_handler.get_trade_method() in ['pm', 'both']:
+            pass
+        if self.config_handler.get_trade_method() in ['post', 'both']:
+            pass
+
+    def _state_posts(self):
+        """
+        Monitors and replies to previously unseen posts on the target
+          subreddit's /new page.
+
+        Will need to call the following methods from self.config_handler:
+          get_monitor_posts()
+          get_monitor_users()
+          get_monitor_format()
+          get_monitor_respond()
+          get_monitor_response()
+        """
+        pass
+
+    def _state_flair(self):
+        """
+        Responsible for verifying and setting user flair with regards to their
+          accounts on http://www.HeatWare.com.
+
+        Will need to call the following methods from self.config_handler:
+          get_heatware_method()
+          if get_heatware_method() in ['post', 'both']:
+            get_heatware_post_id()
+            get_heatware_post_text()
+            get_heatware_post_rate()
+            get_heatware_post_title()
+            get_heatware_post_sticky()
+            get_heatware_post_response()
+          if get_heatware_method() in ['pm', 'both']:
+            get_heatware_message_text()
+            get_heatware_message_title()
+          get_heatware_regex()
+          get_heatware_group()
+          get_heatware_respond()
+
+        Recall:
+          >>> import time, pprint
+          >>> self.heat_parse.parse('2')
+          >>> while len(self.heat_parse) < 1: time.sleep(1)
+          >>> results = {id_: info for id_, info in self.heat_parse}
+          >>> pprint.pprint(results['2'])
+          {'aliases': {'amdmb': {'heat23': None},
+                       'anandtech bbs': {'heat23': 'http://forum.anandtech.com'},
+                       'arstechnica': {'heat23': None},
+                       'geekhack': {'heatware': None},
+                       'techpowerup!': {'heatware': None},
+                       'webhostingtalk': {'heat23': None}},
+           'evaluations': {334221: {'comments': 'Great transaction, he sent money '
+                                                'via paypal and I shipped upon '
+                                                'payment.',
+                                    'date': '06-30-2005',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'floben'},
+                           344973: {'comments': 'What can I say about the owner of '
+                                                'heatware besides the fact that it '
+                                                'was an awesome transaction. I had '
+                                                'no worries about shipping first, '
+                                                'and his great communication '
+                                                'throughout the transaction put me '
+                                                'at ease.',
+                                    'date': '08-17-2005',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'jackson18249'},
+                           345198: {'comments': 'Quick payment & good communication. '
+                                                'You cannot ask for a smoother '
+                                                'transaction!',
+                                    'date': '08-23-2005',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'hkklife'},
+                           356225: {'comments': 'Super-fast payment, prompt response '
+                                                'to PMs. There was a delivery delay '
+                                                '(because of Katrina) but buyer was '
+                                                'very patient and kept in touch. '
+                                                'Thanks!',
+                                    'date': '09-27-2005',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'fornax'},
+                           423266: {'comments': 'This was simply one of the best '
+                                                'transactions I have experienced on '
+                                                'Anandtech. I sent Heat23 a paypal '
+                                                'e-check (expecting for funds to '
+                                                'clear first) but he crosshipped '
+                                                'minutes later on a Saturday. Got '
+                                                'the package Monday morning in the '
+                                                'office. Awesome.',
+                                    'date': '08-14-2006',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'jloor'},
+                           425040: {'comments': 'Fast payment, smooth transaction... '
+                                                'Good guy to deal with! Thanks!',
+                                    'date': '08-23-2006',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'Doctor Feelgood'},
+                           425650: {'comments': 'Heat23 threw in a couple of '
+                                                'freebies and shipped everything out '
+                                                'lightspeed. Thanks Man!',
+                                    'date': '08-26-2006',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'ScottyWH'},
+                           425699: {'comments': 'This was a very smooth transaction. '
+                                                'Heat sent me payment and I sent him '
+                                                'the camera. I would gladly sell to '
+                                                'him again. Thanks!',
+                                    'date': '08-20-2006',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'dak125'},
+                           426236: {'comments': 'The transaction went great, seller '
+                                                'was the easy to deal with and the '
+                                                'shipping was fast. (Freebie '
+                                                'included)...Love to deal again in '
+                                                'the future...',
+                                    'date': '08-29-2006',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'mackle'},
+                           487916: {'comments': 'Good communication, paid via '
+                                                "Paypal, smooth deal. If you can\\'t "
+                                                'trust heat23, who can you trust?;)',
+                                    'date': '08-23-2007',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'Tates'},
+                           496656: {'comments': 'Nice guy to work with. His '
+                                                'contribution to the trading '
+                                                'community is definitely '
+                                                'appreicated!!! Thanks again heat. :)',
+                                    'date': '11-08-2007',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'ELopes580'},
+                           527657: {'comments': 'Though took a bit to get the deal '
+                                                'done, he was courteous, kept in '
+                                                'touch, and made the whole '
+                                                'experience awesome! Thanks for the '
+                                                "phone, it\\'s awesome!",
+                                    'date': '08-04-2008',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'proxops-pete'},
+                           621980: {'comments': 'Donation acknowledgement and thanks '
+                                                'received. Thanks for spending your '
+                                                'time building something to do good.',
+                                    'date': '07-11-2011',
+                                    'forum': 'heatware',
+                                    'user': 'AmboBartok'},
+                           690634: {'comments': 'Got payment quickly, great '
+                                                'comunication. Would deal with again '
+                                                'anytime. A++++',
+                                    'date': '07-23-2014',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'Sniper82'},
+                           699942: {'comments': 'Receiver was packed very well, in '
+                                                'what appeared to be the original '
+                                                'box. This receiver was shipped from '
+                                                'CA to NY and was in beautiful '
+                                                'condition when it arrived. Heat23 '
+                                                'even included a couple HDMI cables. '
+                                                'The item was as described, shipped '
+                                                'promptly, packed very well, and is '
+                                                'working well as I type this. This '
+                                                'transaction could not have gone '
+                                                "better, and I\\'d definitely deal "
+                                                'with Heat23 again.',
+                                    'date': '03-03-2015',
+                                    'forum': 'anandtech bbs',
+                                    'user': 'NicePants42'}},
+           'location': 'Austin, TX',
+           'rating': {'negative': 0, 'neutral': 0, 'positive': 188}}
+        """
+        if self.config_handler.get_heatware_method() in ['pm', 'both']:
+            pass
+        if self.config_handler.get_heatware_method() in ['post', 'both']:
+            pass
+
+    def shutdown(self):
+        self.heat_parse.kill()
+
+    def __repr__(self):
+        # This section is a carbon copy of the vanilla codebase.
+        # ( See:  threading.Thread.__repr__ )
+        thread_status = 'initial'
+        if self._started.is_set():
+            thread_status = 'started'
+        self.is_alive()
+        if self._is_stopped:
+            thread_status = 'stopped'
+        if self._daemonic:
+            thread_status += ' daemon'
+        if self._ident is not None:
+            thread_status += ' %s' % self._ident
+
+        reddit_status = 'logged'
+        if self.is_logged_in():
+            reddit_status += '-in'
+        else:
+            reddit_status += '-out'
+        if self.is_oauth_session():
+            reddit_status += ' oauth2'
+        return "<%s.%s {'thread': (%s, %s), 'reddit': (%s, %s)} at %s>" % (
+            self.__class__.__module__, self.__class__.__name__,
+            self.name, thread_status, self.user, reddit_status, hex(id(self)))
 
 
 class database_handler(shelve.DbfilenameShelf):
@@ -684,8 +966,9 @@ class database_handler(shelve.DbfilenameShelf):
 
     def set(self, key, val):
         try:
-            cur = self.get(key)
-            _ = self.update(val, cur)
+            assert(isinstance(val, dict))
+            cur = self.get(key.lower())
+            val = self.update(val, cur)
             self[key.lower()] = val
             return True
         except:
@@ -693,14 +976,14 @@ class database_handler(shelve.DbfilenameShelf):
 
     def remove(self, key):
         try:
-            del self[key]
+            del self[key.lower()]
             return True
         except:
             return False
 
     def update(self, new_, orig):
         for key, val in orig.items():
-            if isinstance(val, collections.Mapping):
+            if isinstance(val, dict):
                 new_[key] = self.update(new_.get(key, {}), val)
             else:
                 new_[key] = orig[key]
@@ -711,7 +994,7 @@ class database_handler(shelve.DbfilenameShelf):
         self.close()
 
 
-class heatware_crawler():
+class heatware_crawler(multiprocessing.Process):
 
     def __init__(self, page_wait=0, deep_parse=False, rand_wait=False):
         # TODO: See if heat is okay with maximum one request per sixty seconds.
@@ -720,6 +1003,7 @@ class heatware_crawler():
         #           to allow any sort of automated crawling, but I won't
         #           implement the ability to perform a 'deep_parse' until I
         #           get confirmation from the man himself.
+        self._state = multiprocessing.Value('c', 0)
         self.page_wait = max(60, page_wait)
         self.sqrt_wait = math.sqrt(self.page_wait)
         # TODO: See if heat is okay with deep crawling of his site.
@@ -757,8 +1041,72 @@ class heatware_crawler():
         }
         self.text_clean = regex.compile(r'\s+', regex.UNICODE)
         self.date_clean = regex.compile(r'\d{2}-\d{2}-\d{4}', regex.UNICODE)
+        self.info_queue = multiprocessing.Queue()
+        self.user_queue = multiprocessing.JoinableQueue()
+        super().__init__()
+        self.daemon = True
+        self.start()
 
-    def parse(self, url):
+    def run(self):
+        while True:
+            self._state.value = b'i'
+            heatware_id = self.user_queue.get()
+            if heatware_id is Ellipsis:
+                break
+            else:
+                self._state.value = b'b'
+                information = self._parse(heatware_id)
+                self.info_queue.put((heatware_id, information))
+                self.user_queue.task_done()
+        self._state.value = b'd'
+
+    def parse(self, id_):
+        self.user_queue.put(id_)
+
+    def kill(self):
+        self.user_queue.put(Ellipsis)
+
+    def state(self):
+        if self._state.value == b'i':
+            return 'idle'
+        if self._state.value == b'b':
+            return 'busy'
+        if self._state.value == b'd':
+            return 'dead'
+        return 'none'
+
+    def is_idle(self):
+        return self._state.value == b'i'
+
+    def is_busy(self):
+        return self._state.value == b'b'
+
+    def is_dead(self):
+        return self._state.value == b'd'
+
+    def remaining_jobs(self):
+        # Not exact.
+        return self.user_queue.qsize()
+
+    def __nonzero__(self):
+        # Not reliable.
+        return self.info_queue.empty()
+
+    def __len__(self):
+        # Not exact.
+        return self.info_queue.qsize()
+
+    def __iter__(self):
+        try:
+            while True:
+                yield self.info_queue.get_nowait()
+        except:
+            raise StopIteration
+
+    def _parse(self, id_):
+        return self._extract(self.root_page + str(id_))
+
+    def _extract(self, url):
         time.sleep(max(0, self.next_time - time.time()))
         info = copy.deepcopy(self.info_dict)
         page = self.get_page(url)
@@ -775,9 +1123,6 @@ class heatware_crawler():
                     info[self.subhead_map[subhead.text]['key']] = (copy.deepcopy(
                         self.info_dict[self.subhead_map[subhead.text]['key']]))
         return info
-
-    def parse_id(self, id_):
-        return self.parse(self.root_page + str(id_))
 
     def _summary(self, spoonful, soup):
         root = spoonful.parent
@@ -829,7 +1174,7 @@ class heatware_crawler():
                 info['user'] = None
 
             try:
-                info_string = soup.find(id=('row_%i' % info['id'])).text
+                info_string = soup.find(id=('row_%i' % id_)).text
                 date_match = self.date_clean.search(info_string)
                 info['date'] = self._clean(date_match.group(0))
                 date_span = date_match.span(0)
